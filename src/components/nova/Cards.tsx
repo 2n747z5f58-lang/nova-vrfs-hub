@@ -10,9 +10,9 @@ export function TeamCrest({
   logoUrl,
   size = 32,
 }: {
-  name?: string | null;
-  logoUrl?: string | null;
-  size?: number;
+  name?: string | null | undefined;
+  logoUrl?: string | null | undefined;
+  size?: number | undefined;
 }) {
   const initials = (name ?? "?")
     .split(" ")
