@@ -332,8 +332,11 @@ export async function getProfile(userId: string) {
   return data as Profile | null;
 }
 
-export async function updateProfile(userId: string, patch: Partial<Profile>) {
-  const { error } = await supabase.from("profiles").update(patch).eq("id", userId);
+export async function updateProfile(userId: string, patch: Record<string, unknown>) {
+  const { error } = await supabase
+    .from("profiles")
+    .update(patch as never)
+    .eq("id", userId);
   if (error) throw new Error(error.message);
 }
 
