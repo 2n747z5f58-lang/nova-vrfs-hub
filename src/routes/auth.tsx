@@ -35,7 +35,7 @@ function AuthPage() {
       options: { redirectTo: window.location.origin },
     });
     setBusy(false);
-    if (error) {
+    if (error !== null) {
       setDiscordNote(
         "Discord sign-in is not configured yet. A Discord application (client ID + client secret) must be added to the backend auth settings before this button can work — nothing is faked here.",
       );
@@ -52,14 +52,20 @@ function AuthPage() {
         options: { emailRedirectTo: window.location.origin },
       });
       setBusy(false);
-      if (error) return toast.error(error.message);
+      if (error) {
+        toast.error(error.message);
+        return;
+      }
       toast.success("Account created. Check your email to confirm, then sign in.");
       setMode("signin");
       return;
     }
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     setBusy(false);
-    if (error) return toast.error(error.message);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
     toast.success("Signed in");
     navigate({ to: "/dashboard" });
   }
