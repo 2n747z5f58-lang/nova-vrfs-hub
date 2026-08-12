@@ -475,9 +475,6 @@ function AdminPage() {
                     to_team_id: form["to_team_id"] || null,
                     details: form["details"] || null,
                   });
-                  if (form["to_team_id"]) {
-                    await adminInsert("players", {}).catch(() => undefined);
-                  }
                   const p = (players.data ?? []).find((x) => x.id === form["player_id"]);
                   if (form["player_id"]) {
                     await notifyFavourites({
