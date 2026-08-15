@@ -55,15 +55,9 @@ export const sign: NovaCommand = {
       details: fee > 0 ? `Free agent signing for ${fee}` : 'Free agent signing',
     });
 
-    if (player.profile_id ?? null) {
-      await db
-        .from('team_members')
-        .insert({ team_id: team.id, player_id: player.id, role: 'player', status: 'active' });
-    } else {
-      await db
-        .from('team_members')
-        .insert({ team_id: team.id, player_id: player.id, role: 'player', status: 'active' });
-    }
+    await db
+      .from('team_members')
+      .insert({ team_id: team.id, player_id: player.id, role: 'player', status: 'active' });
 
     const label = player.display_name ?? player.username;
     await notifyFavourites({
