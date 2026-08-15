@@ -1,0 +1,98 @@
+import { Client, Events, GatewayIntentBits, MessageFlags } from 'discord.js';
+import { env } from './env.js';
+import { commandMap } from './commands/index.js';
+import { getActor } from './lib/perms.js';
+import { errorEmbed, field, money, successEmbed } from './lib/format.js';
+import {
+  OFFER_ACCEPT,
+  OFFER_DECLINE,
+  completeTransfer,
+  declineOffer,
+  getOffer,
+  requireOfferResponder,
+} from './lib/transfers.js';
+import { db, must } from './supabase.js';
+import type { Player } from './lib/types.js';
+
+const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+
+const PLAYER_COLS =
+  'id,username,display_name,discord_id,team_id,loan_team_id,position,goals,assists,appearances,profile_id';
+
+function messageOf(error: unknown) {
+  return error instanceof Error ? error.message : 'Something went wrong. Please try again.';
+}
+
+client.once(Events.ClientReady, (c) => {
+  console.log(`NOVA bot online as ${c.user.tag}`);
+});
+
+client.on(Events.InteractionCreate, async (interaction) => {
+  try {
+    if (interaction.isChatInputCommand()) {
+      const command = commandMap.get(interaction.commandName);
+      if (!command) return;
+      await interaction.deferReply();
+      const actor = await getActor(interaction.user.id);
+      await command.execute(interaction, actor);
+      return;
+    }
+
+    if (interaction.isButton()) {
+      const [action, offerId] = [
+        interaction.customId.slice(0, interaction.customId.lastIndexOf(':')),
+        interaction.customId.slice(interaction.customId.lastIndexOf(':') + 1),
+      ];
+      if (action !== OFFER_ACCEPT && action !== OFFER_DECLINE) return;
+
+      await interaction.deferReply();
+      const actor = await getActor(interaction.user.id);
+      const offer = await getOffer(offerId);
+      if (offer.status !== 'pending') {
+        throw new Error(`This offer has already been **${offer.status}**.`);
+      }
+
+      const player = must<Player>(
+        (await db.from('players').select(PLAYER_COLS).eq('id', offer.player_id).maybeSingle()) as never,
+      );
+      requireOfferResponder(actor, offer, player);
+      const label = player.display_name ?? player.username;
+
+      if (action === OFFER_DECLINE) {
+        await declineOffer(offer, actor);
+        await interaction.message.edit({ components: [] }).catch(() => {});
+        await interaction.editReply({
+          embeds: [errorEmbed(`The offer for **${label}** was **declined**.`)],
+        });
+        return;
+      }
+
+      const done = await completeTransfer(offer, actor);
+      await interaction.message.edit({ components: [] }).catch(() => {});
+      await interaction.editReply({
+        embeds: [
+          successEmbed('Transfer complete', `**${label}** has signed for **${done.toTeam.name}**.`).addFields(
+            field('From', done.fromTeam?.name ?? 'Free agent'),
+            field('Fee', done.fee > 0 ? money(done.fee) : 'Free'),
+          ),
+        ],
+      });
+    }
+  } catch (error) {
+    const embed = errorEmbed(messageOf(error));
+    try {
+      if (interaction.isRepliable()) {
+        if (interaction.deferred || interaction.replied) {
+          await interaction.editReply({ embeds: [embed], components: [] });
+        } else {
+          await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+        }
+      }
+    } catch (replyError) {
+      console.error('Failed to report error to Discord:', replyError);
+    }
+    console.error(error);
+  }
+});
+
+client.login(env.discordToken);

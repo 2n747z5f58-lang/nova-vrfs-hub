@@ -18,7 +18,7 @@ export const db = createClient(env.supabaseUrl, env.supabaseServiceRoleKey, {
         headers.delete('Authorization');
       }
       headers.set('apikey', env.supabaseServiceRoleKey);
-      return fetch(input as RequestInfo, { ...init, headers });
+      return fetch(input as Parameters<typeof fetch>[0], { ...init, headers });
     },
   },
 });

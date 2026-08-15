@@ -21,6 +21,7 @@ export interface Player {
   username: string;
   display_name: string | null;
   discord_id: string | null;
+  profile_id?: string | null;
   team_id: string | null;
   loan_team_id: string | null;
   position: string | null;
