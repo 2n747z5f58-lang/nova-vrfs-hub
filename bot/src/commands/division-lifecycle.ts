@@ -90,8 +90,8 @@ export const enddivision: NovaCommand = {
 
     const podium =
       (table ?? [])
-        .map((r: never, i: number) => {
-          const row = r as unknown as { points: number; teams?: { name?: string } | null };
+        .map((r: unknown, i: number) => {
+          const row = r as { points: number; teams?: { name?: string } | null };
           return `${['🥇', '🥈', '🥉'][i]} **${row.teams?.name ?? 'Unknown'}** — ${row.points} pts`;
         })
         .join('\n') || 'No completed fixtures.';
