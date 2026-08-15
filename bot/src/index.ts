@@ -1,6 +1,6 @@
-import { Client, Events, GatewayIntentBits, MessageFlags } from 'discord.js';
+import { Client, Events, GatewayIntentBits, MessageFlags, REST, Routes } from 'discord.js';
 import { env } from './env.js';
-import { commandMap } from './commands/index.js';
+import { commands, commandMap } from './commands/index.js';
 import { getActor } from './lib/perms.js';
 import { errorEmbed, field, money, successEmbed } from './lib/format.js';
 import {
@@ -23,8 +23,17 @@ function messageOf(error: unknown) {
   return error instanceof Error ? error.message : 'Something went wrong. Please try again.';
 }
 
-client.once(Events.ClientReady, (c) => {
+client.once(Events.ClientReady, async (c) => {
   console.log(`NOVA bot online as ${c.user.tag}`);
+
+  const rest = new REST({ version: '10' }).setToken(env.discordToken);
+
+  await rest.put(
+    Routes.applicationCommands(c.user.id),
+    { body: commands.map((command) => command.data.toJSON()) },
+  );
+
+  console.log(`Registered ${commands.length} slash commands.`);
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
