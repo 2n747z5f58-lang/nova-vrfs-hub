@@ -5,7 +5,7 @@
   "description": "NOVA VRFS Discord bot — the management/data engine for the NOVA platform. Supabase is the single source of truth.",
   "type": "module",
   "main": "dist/index.js",
-  "engines": { "node": ">=20" },
+  "engines": { "node": "22.x" },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
