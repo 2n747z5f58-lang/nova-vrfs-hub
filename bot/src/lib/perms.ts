@@ -49,25 +49,23 @@ export async function getActor(discordId: string): Promise<Actor> {
 }
 
 export function isAdmin(actor: Actor) {
-  return actor.roles.includes('admin');
+  return actor.roles.includes('ADMIN');
 }
 
 export function isStaff(actor: Actor) {
-  return actor.roles.includes('admin') || actor.roles.includes('overseer');
+  return actor.roles.includes('ADMIN') || actor.roles.includes('OVERSEER');
 }
-
 export function managesTeam(actor: Actor, teamId: string | null | undefined) {
   return !!teamId && actor.managedTeamIds.includes(teamId);
 }
 
 export function highestRole(actor: Actor): NovaRole {
-  if (actor.roles.includes('admin')) return 'ADMIN';
-  if (actor.roles.includes('overseer')) return 'OVERSEER';
-  if (actor.roles.includes('manager')) return 'MANAGER';
-  if (actor.roles.includes('co_manager')) return 'CO-MANAGER';
+  if (actor.roles.includes('ADMIN')) return 'ADMIN';
+  if (actor.roles.includes('OVERSEER')) return 'OVERSEER';
+  if (actor.roles.includes('MANAGER')) return 'MANAGER';
+  if (actor.roles.includes('CO-MANAGER')) return 'CO-MANAGER';
   return 'PLAYER';
 }
-
 export class PermissionError extends Error {}
 
 /** Throws unless the actor is ADMIN or OVERSEER. */
