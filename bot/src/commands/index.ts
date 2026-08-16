@@ -9,6 +9,7 @@ import { recall } from './recall.js';
 import { transfer } from './transfer.js';
 import { budget } from './budget.js';
 import { release } from './release.js';
+import { setup } from './setup.js';
 
 export const commands: NovaCommand[] = [
   submitresult,
@@ -22,6 +23,7 @@ export const commands: NovaCommand[] = [
   transfer,
   budget,
   release,
+  setup,
 ];
 
 export const commandMap = new Map(commands.map((c) => [c.data.name, c]));

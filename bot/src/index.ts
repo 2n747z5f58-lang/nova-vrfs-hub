@@ -11,6 +11,15 @@ import {
   getOffer,
   requireOfferResponder,
 } from './lib/transfers.js';
+import {
+  ROLE_SLOTS,
+  SETUP_SELECT,
+  getGuildSettings,
+  isRoleSlot,
+  requireDiscordAdministrator,
+  saveRoleSetting,
+  setupPanel,
+} from './lib/guild-settings.js';
 import { db, must } from './supabase.js';
 import type { Player } from './lib/types.js';
 
@@ -41,9 +50,34 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.isChatInputCommand()) {
       const command = commandMap.get(interaction.commandName);
       if (!command) return;
-      await interaction.deferReply();
+      await interaction.deferReply({ flags: command.ephemeral ? MessageFlags.Ephemeral : undefined });
       const actor = await getActor(interaction.user.id);
       await command.execute(interaction, actor);
+      return;
+    }
+
+    if (interaction.isRoleSelectMenu()) {
+      const [, , , slot] = interaction.customId.split(':');
+      if (!interaction.customId.startsWith(SETUP_SELECT) || !slot || !isRoleSlot(slot)) return;
+
+      await interaction.deferUpdate();
+      requireDiscordAdministrator(interaction);
+      const guildId = interaction.guildId!;
+      const roleId = interaction.values[0] ?? null;
+      const settings = await saveRoleSetting({
+        guildId,
+        guildName: interaction.guild?.name ?? null,
+        slot,
+        roleId,
+        actorDiscordId: interaction.user.id,
+      });
+      await interaction.editReply(
+        setupPanel(
+          interaction.guild?.name ?? guildId,
+          settings,
+          `✅ **${ROLE_SLOTS[slot].label}** ${roleId ? `set to <@&${roleId}>` : 'cleared'} and saved for this server.`,
+        ),
+      );
       return;
     }
 

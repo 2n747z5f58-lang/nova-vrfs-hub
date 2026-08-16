@@ -249,6 +249,39 @@ export type Database = {
           },
         ]
       }
+      guild_settings: {
+        Row: {
+          co_manager_role_id: string | null
+          created_at: string
+          guild_id: string
+          guild_name: string | null
+          manager_role_id: string | null
+          player_role_id: string | null
+          updated_at: string
+          updated_by_discord_id: string | null
+        }
+        Insert: {
+          co_manager_role_id?: string | null
+          created_at?: string
+          guild_id: string
+          guild_name?: string | null
+          manager_role_id?: string | null
+          player_role_id?: string | null
+          updated_at?: string
+          updated_by_discord_id?: string | null
+        }
+        Update: {
+          co_manager_role_id?: string | null
+          created_at?: string
+          guild_id?: string
+          guild_name?: string | null
+          manager_role_id?: string | null
+          player_role_id?: string | null
+          updated_at?: string
+          updated_by_discord_id?: string | null
+        }
+        Relationships: []
+      }
       leagues: {
         Row: {
           created_at: string
