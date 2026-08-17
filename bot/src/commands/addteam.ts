@@ -1,4 +1,4 @@
-import { SlashCommandBuilder } from 'discord.js';
+import { PermissionsBitField, SlashCommandBuilder } from 'discord.js';
 import type { NovaCommand } from '../lib/command.js';
 import { db, must } from '../supabase.js';
 import { findDivision, findLeague, slugify } from '../lib/resolve.js';
