@@ -16,7 +16,11 @@ export const addteam: NovaCommand = {
     .addStringOption((o) => o.setName('logo_url').setDescription('Club badge URL')),
 
   async execute(interaction, actor) {
-    requireStaff(actor);
+    const isDiscordAdmin = interaction.memberPermissions?.has(PermissionsBitField.Flags.Administrator) ?? false;
+
+if (!isDiscordAdmin) {
+  requireStaff(actor);
+}
     const name = interaction.options.getString('name', true).trim();
     const divisionName = interaction.options.getString('division');
     const division = divisionName ? await findDivision(divisionName) : null;
