@@ -57,10 +57,57 @@ export interface Fixture {
   home_score: number | null;
   away_score: number | null;
   competition: string | null;
+  venue: string | null;
+  gameweek: number | null;
   home_team?: { id: string; name: string; slug: string; logo_url: string | null } | null;
   away_team?: { id: string; name: string; slug: string; logo_url: string | null } | null;
   leagues?: { name: string; slug: string } | null;
   divisions?: { name: string } | null;
+}
+
+export interface MatchEvent {
+  id: string;
+  fixture_id: string;
+  player_id: string | null;
+  team_id: string | null;
+  event_type: string;
+  minute: number | null;
+  players?: { id: string; username: string; display_name: string | null } | null;
+  teams?: { id: string; name: string; slug: string } | null;
+}
+
+export interface TransferRecord {
+  id: string;
+  player_id: string;
+  from_team_id: string | null;
+  to_team_id: string | null;
+  transfer_date: string;
+  details: string | null;
+  fee: number;
+  status: string;
+  completed_at: string | null;
+  players?: { id: string; username: string; display_name: string | null } | null;
+  from_team?: { id: string; name: string; slug: string } | null;
+  to_team?: { id: string; name: string; slug: string } | null;
+}
+
+export interface AdminStats {
+  total_users: number;
+  total_teams: number;
+  total_players: number;
+  total_leagues: number;
+  total_fixtures: number;
+  upcoming_fixtures: number;
+  completed_results: number;
+  total_transfers: number;
+}
+
+export interface AdminUser {
+  id: string;
+  username: string | null;
+  display_name: string | null;
+  created_at: string;
+  role: string | null;
 }
 
 export interface StandingRow {
@@ -101,6 +148,12 @@ export interface Profile {
 
 const FIXTURE_SELECT =
   "*, home_team:teams!fixtures_home_team_id_fkey(id,name,slug,logo_url), away_team:teams!fixtures_away_team_id_fkey(id,name,slug,logo_url), leagues(name,slug), divisions(name)";
+
+const MATCH_EVENT_SELECT =
+  "*, players(id,username,display_name), teams(id,name,slug)";
+
+const TRANSFER_SELECT =
+  "*, players(id,username,display_name), from_team:teams!transfers_from_team_id_fkey(id,name,slug), to_team:teams!transfers_to_team_id_fkey(id,name,slug)";
 
 function unwrap<T>(res: { data: T | null; error: { message: string } | null }): T {
   if (res.error) throw new Error(res.error.message);
@@ -190,21 +243,10 @@ export async function getPlayerStats(playerId: string) {
 export async function listTransfers(playerId?: string) {
   let q = supabase
     .from("transfers")
-    .select(
-      "*, players(id,username), from_team:teams!transfers_from_team_id_fkey(name,slug), to_team:teams!transfers_to_team_id_fkey(name,slug)",
-    )
+    .select(TRANSFER_SELECT)
     .order("transfer_date", { ascending: false });
   if (playerId) q = q.eq("player_id", playerId);
-  return unwrap<
-    {
-      id: string;
-      transfer_date: string;
-      details: string | null;
-      players?: { id: string; username: string } | null;
-      from_team?: { name: string; slug: string } | null;
-      to_team?: { name: string; slug: string } | null;
-    }[]
-  >((await q) as never);
+  return unwrap<TransferRecord[]>((await q) as never);
 }
 
 /* ---------- Fixtures / results ---------- */
@@ -409,4 +451,229 @@ export async function notifyFavourites(input: {
   const { error: insErr } = await supabase.from("notifications").insert(rows);
   if (insErr) throw new Error(insErr.message);
   return rows.length;
+}
+
+/* ---------- Match details ---------- */
+
+export async function getFixture(id: string) {
+  const { data, error } = await supabase
+    .from("fixtures")
+    .select(FIXTURE_SELECT)
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data as Fixture | null;
+}
+
+export async function listMatchEvents(fixtureId: string) {
+  return unwrap<MatchEvent[]>(
+    (await supabase
+      .from("match_events")
+      .select(MATCH_EVENT_SELECT)
+      .eq("fixture_id", fixtureId)
+      .order("minute", { ascending: true })) as never,
+  );
+}
+
+export async function addMatchEvent(input: {
+  fixture_id: string;
+  player_id: string;
+  team_id: string;
+  event_type: string;
+  minute: number;
+}) {
+  const { error } = await supabase.from("match_events").insert(input);
+  if (error) throw new Error(error.message);
+  if (input.event_type === "goal") {
+    await notifyFavourites({
+      itemType: "player",
+      itemId: input.player_id,
+      type: "goal",
+      title: "Goal scored",
+      message: "A player you follow has scored.",
+    });
+  }
+}
+
+/* ---------- Admin stats & user management ---------- */
+
+export async function getAdminStats() {
+  const { data, error } = await supabase.rpc("admin_stats");
+  if (error) throw new Error(error.message);
+  return data as unknown as AdminStats;
+}
+
+export async function listAdminUsers() {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, username, display_name, created_at")
+    .order("created_at", { ascending: false });
+  if (error) throw new Error(error.message);
+  const profiles = data ?? [];
+  const userIds = profiles.map((p) => p.id);
+  const { data: roleRows } = await supabase
+    .from("user_roles")
+    .select("user_id, role")
+    .in("user_id", userIds);
+  const roleMap = new Map<string, string>();
+  for (const r of roleRows ?? []) {
+    const existing = roleMap.get(r.user_id as string);
+    if (!existing || rolePriority(r.role as string) > rolePriority(existing)) {
+      roleMap.set(r.user_id as string, r.role as string);
+    }
+  }
+  return profiles.map((p) => ({
+    ...p,
+    role: roleMap.get(p.id as string) ?? "user",
+  })) as AdminUser[];
+}
+
+function rolePriority(role: string): number {
+  if (role === "admin") return 3;
+  if (role === "overseer") return 2;
+  return 1;
+}
+
+export async function setUserRole(targetUserId: string, newRole: "admin" | "overseer" | "user") {
+  const { error } = await supabase.rpc("set_user_role", {
+    _target_user_id: targetUserId,
+    _new_role: newRole,
+  });
+  if (error) throw new Error(error.message);
+}
+
+/* ---------- Global search ---------- */
+
+export interface SearchResult {
+  type: "team" | "player" | "league" | "match";
+  id: string;
+  label: string;
+  subtitle: string;
+  href: string;
+}
+
+export async function globalSearch(query: string): Promise<SearchResult[]> {
+  if (!query.trim()) return [];
+  const q = query.trim();
+  const results: SearchResult[] = [];
+
+  const [teams, players, leagues, fixtures] = await Promise.all([
+    supabase
+      .from("teams")
+      .select("id,name,slug,leagues(name)")
+      .ilike("name", `%${q}%`)
+      .limit(5),
+    supabase
+      .from("players")
+      .select("id,username,display_name,teams(name)")
+      .or(`username.ilike.%${q}%,display_name.ilike.%${q}%`)
+      .limit(5),
+    supabase
+      .from("leagues")
+      .select("id,name,slug")
+      .ilike("name", `%${q}%`)
+      .limit(5),
+    supabase
+      .from("fixtures")
+      .select("id,home_team:teams!fixtures_home_team_id_fkey(name),away_team:teams!fixtures_away_team_id_fkey(name),kickoff_at")
+      .gte("kickoff_at", new Date().toISOString())
+      .limit(5),
+  ]);
+
+  for (const t of teams.data ?? []) {
+    results.push({
+      type: "team",
+      id: t.id,
+      label: t.name,
+      subtitle: (t as { leagues?: { name?: string } }).leagues?.name ?? "Team",
+      href: `/teams/${t.slug}`,
+    });
+  }
+  for (const p of players.data ?? []) {
+    results.push({
+      type: "player",
+      id: p.id,
+      label: p.display_name ?? p.username,
+      subtitle: (p as { teams?: { name?: string } }).teams?.name ?? "Free agent",
+      href: `/players/${p.id}`,
+    });
+  }
+  for (const l of leagues.data ?? []) {
+    results.push({
+      type: "league",
+      id: l.id,
+      label: l.name,
+      subtitle: "League",
+      href: `/leagues/${l.slug}`,
+    });
+  }
+  for (const f of fixtures.data ?? []) {
+    const fh = (f as { home_team?: { name?: string } }).home_team?.name ?? "TBD";
+    const fa = (f as { away_team?: { name?: string } }).away_team?.name ?? "TBD";
+    results.push({
+      type: "match",
+      id: f.id,
+      label: `${fh} vs ${fa}`,
+      subtitle: new Date(f.kickoff_at).toLocaleDateString(),
+      href: `/matches/${f.id}`,
+    });
+  }
+  return results;
+}
+
+/* ---------- Loans / signings / releases ---------- */
+
+export async function listLoans() {
+  return unwrap<
+    {
+      id: string;
+      status: string;
+      start_date: string;
+      end_date: string | null;
+      players?: { id: string; username: string; display_name: string | null } | null;
+      parent_team?: { id: string; name: string; slug: string } | null;
+      loan_team?: { id: string; name: string; slug: string } | null;
+    }[]
+  >(
+    (await supabase
+      .from("loans")
+      .select(
+        "id,status,start_date,end_date,players(id,username,display_name),parent_team:teams!loans_parent_team_id_fkey(id,name,slug),loan_team:teams!loans_loan_team_id_fkey(id,name,slug)",
+      )
+      .order("start_date", { ascending: false })) as never,
+  );
+}
+
+export async function listSignings() {
+  return unwrap<
+    {
+      id: string;
+      created_at: string;
+      details: string | null;
+      players?: { id: string; username: string; display_name: string | null } | null;
+      teams?: { id: string; name: string; slug: string } | null;
+    }[]
+  >(
+    (await supabase
+      .from("signings")
+      .select("id,created_at,details,players(id,username,display_name),teams(id,name,slug)")
+      .order("created_at", { ascending: false })) as never,
+  );
+}
+
+export async function listReleases() {
+  return unwrap<
+    {
+      id: string;
+      created_at: string;
+      reason: string | null;
+      players?: { id: string; username: string; display_name: string | null } | null;
+      teams?: { id: string; name: string; slug: string } | null;
+    }[]
+  >(
+    (await supabase
+      .from("releases")
+      .select("id,created_at,reason,players(id,username,display_name),teams(id,name,slug)")
+      .order("created_at", { ascending: false })) as never,
+  );
 }

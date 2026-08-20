@@ -31,15 +31,15 @@ export function FavouriteButton({
         toggle(type, itemId);
       }}
       className={cn(
-        "flex shrink-0 items-center justify-center gap-1.5 rounded-sm border transition-colors",
+        "flex shrink-0 items-center justify-center gap-1.5 rounded-md border transition-all duration-200",
         size === "icon" ? "h-9 w-9" : "h-9 px-3 text-xs font-bold uppercase tracking-wider",
         active
-          ? "border-warning/60 bg-warning/10 text-warning"
-          : "border-border text-muted-foreground hover:text-foreground",
+          ? "border-accent-green/50 bg-accent-green/10 text-accent-green"
+          : "border-border text-muted-foreground hover:border-border-strong hover:text-foreground",
         className,
       )}
     >
-      <Star className={cn("h-4 w-4", active && "fill-current")} />
+      <Star className={cn("h-4 w-4 transition-transform", active && "fill-current scale-110")} />
       {size === "default" && (label ?? (active ? "Favourited" : "Favourite"))}
     </button>
   );
