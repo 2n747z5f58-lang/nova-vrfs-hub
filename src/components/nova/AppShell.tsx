@@ -1,24 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import {
-  Bell,
-  CalendarDays,
-  Home,
-  LayoutDashboard,
-  ListOrdered,
-  Menu,
-  Shield,
-  Star,
-  Trophy,
-  User,
-  Users,
-  UserRound,
-  X,
-  ClipboardList,
-  ArrowLeftRight,
-  Search,
-} from "lucide-react";
+import { Bell, CalendarDays, Hop as Home, LayoutDashboard, ListOrdered, Menu, Shield, Star, Trophy, User, Users, UserRound, X, ClipboardList, ArrowLeftRight, Search } from "lucide-react";
 import novaMark from "@/assets/nova-mark.asset.json";
 import { useAuth } from "@/hooks/useAuth";
 import { listNotifications, globalSearch, type SearchResult } from "@/lib/nova/api";
