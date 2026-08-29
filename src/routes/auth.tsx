@@ -15,11 +15,7 @@ function AuthPage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      if (data.session) void navigate({ to: "/" });
-    });
-  }, [navigate]);
+
 
   async function submit(event: FormEvent) {
     event.preventDefault();
