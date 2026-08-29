@@ -24,7 +24,7 @@ function AuthPage() {
     const result = mode === "signin" ? await supabase.auth.signInWithPassword({ email, password }) : await supabase.auth.signUp({ email, password, options: { emailRedirectTo: `${window.location.origin}/auth-callback` } });
     if (result.error) { setError(result.error.message); playUiSound("error"); setBusy(false); return; }
     playUiSound("success");
-    if (result.data.session) void navigate({ to: "/" }); else setMessage("Check your email to confirm your account.");
+    if (result.data.session) void navigate({ to: "/profile-setup" }); else setMessage("Check your email to confirm your account.");
     setBusy(false);
   }
 
