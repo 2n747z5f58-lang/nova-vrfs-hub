@@ -5,19 +5,27 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * NOVA design system — premium dark VRFS esports platform.
- * Near-black surfaces, light grey text, green accent, soft shadows,
- * moderate corner radius, smooth transitions.
+ * Design system definition.
+ *
+ * The @theme inline block maps CSS custom properties to Tailwind utility
+ * classes (e.g. --color-primary -> bg-primary, text-primary).
+ *
+ * The :root and .dark blocks define the actual color values using oklch.
+ * All colors MUST use oklch format.
+ *
+ * To add a new semantic color:
+ * 1. Add the variable to :root (light value) and .dark (dark value)
+ * 2. Register it in @theme inline as --color-<name>: var(--<name>)
  */
 
 @theme inline {
-  --radius-sm: 3px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
-  --radius-xl: 12px;
-  --radius-2xl: 16px;
-  --radius-3xl: 20px;
-  --radius-4xl: 24px;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -34,61 +42,94 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
-  --color-success: var(--success);
-  --color-warning: var(--warning);
-  --color-live: var(--live);
   --color-border: var(--border);
-  --color-border-strong: var(--border-strong);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --color-surface: var(--surface);
-  --color-surface-2: var(--surface-2);
+  --color-ring-offset-background: var(--background);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
   --color-sidebar-accent: var(--sidebar-accent);
-  --color-accent-green: var(--accent-green);
-  --color-accent-green-foreground: var(--accent-green-foreground);
-  --font-sans: "Inter var", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
 }
 
 :root {
-  --radius: 6px;
-  --background: oklch(0.145 0.003 260);
-  --foreground: oklch(0.97 0 0);
-  --surface: oklch(0.19 0.003 260);
-  --surface-2: oklch(0.235 0.004 260);
-  --card: oklch(0.185 0.003 260);
-  --card-foreground: oklch(0.97 0 0);
-  --popover: oklch(0.2 0.003 260);
-  --popover-foreground: oklch(0.97 0 0);
-  --primary: oklch(0.97 0 0);
-  --primary-foreground: oklch(0.145 0.003 260);
-  --secondary: oklch(0.255 0.004 260);
-  --secondary-foreground: oklch(0.97 0 0);
-  --muted: oklch(0.24 0.004 260);
-  --muted-foreground: oklch(0.66 0.005 260);
-  --accent: oklch(0.28 0.005 260);
-  --accent-foreground: oklch(0.98 0 0);
-  --destructive: oklch(0.58 0.21 25);
-  --destructive-foreground: oklch(0.98 0 0);
-  --success: oklch(0.72 0.16 152);
-  --warning: oklch(0.79 0.15 80);
-  --live: oklch(0.66 0.22 22);
-  --border: oklch(0.27 0.004 260);
-  --border-strong: oklch(0.36 0.005 260);
-  --input: oklch(0.27 0.004 260);
-  --ring: oklch(0.55 0.006 260);
-  --sidebar: oklch(0.12 0.003 260);
-  --sidebar-foreground: oklch(0.92 0 0);
-  --sidebar-border: oklch(0.22 0.004 260);
-  --sidebar-accent: oklch(0.2 0.004 260);
-  --accent-green: oklch(0.72 0.16 152);
-  --accent-green-foreground: oklch(0.13 0.003 152);
+  --radius: 0.75rem;
+  --background: oklch(0.09 0 0);
+  --foreground: oklch(0.96 0 0);
+  --card: oklch(0.14 0 0);
+  --card-foreground: oklch(0.96 0 0);
+  --popover: oklch(0.14 0 0);
+  --popover-foreground: oklch(0.96 0 0);
+  --primary: oklch(0.96 0 0);
+  --primary-foreground: oklch(0.09 0 0);
+  --secondary: oklch(0.19 0 0);
+  --secondary-foreground: oklch(0.9 0 0);
+  --muted: oklch(0.18 0 0);
+  --muted-foreground: oklch(0.68 0 0);
+  --accent: oklch(0.24 0 0);
+  --accent-foreground: oklch(0.96 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.984 0.003 247.858);
+  --border: oklch(0.28 0 0);
+  --input: oklch(0.32 0 0);
+  --ring: oklch(0.82 0 0);
+  --chart-1: oklch(0.8 0 0);
+  --chart-2: oklch(0.65 0 0);
+  --chart-3: oklch(0.5 0 0);
+  --chart-4: oklch(0.38 0 0);
+  --chart-5: oklch(0.25 0 0);
+  --sidebar: oklch(0.11 0 0);
+  --sidebar-foreground: oklch(0.96 0 0);
+  --sidebar-primary: oklch(0.96 0 0);
+  --sidebar-primary-foreground: oklch(0.09 0 0);
+  --sidebar-accent: oklch(0.2 0 0);
+  --sidebar-accent-foreground: oklch(0.96 0 0);
+  --sidebar-border: oklch(0.25 0 0);
+  --sidebar-ring: oklch(0.82 0 0);
 }
 
 .dark {
-  color-scheme: dark;
+  --background: oklch(0.129 0.042 264.695);
+  --foreground: oklch(0.984 0.003 247.858);
+  --card: oklch(0.208 0.042 265.755);
+  --card-foreground: oklch(0.984 0.003 247.858);
+  --popover: oklch(0.208 0.042 265.755);
+  --popover-foreground: oklch(0.984 0.003 247.858);
+  --primary: oklch(0.929 0.013 255.508);
+  --primary-foreground: oklch(0.208 0.042 265.755);
+  --secondary: oklch(0.279 0.041 260.031);
+  --secondary-foreground: oklch(0.984 0.003 247.858);
+  --muted: oklch(0.279 0.041 260.031);
+  --muted-foreground: oklch(0.704 0.04 256.788);
+  --accent: oklch(0.279 0.041 260.031);
+  --accent-foreground: oklch(0.984 0.003 247.858);
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.984 0.003 247.858);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.551 0.027 264.364);
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+  --sidebar: oklch(0.208 0.042 265.755);
+  --sidebar-foreground: oklch(0.984 0.003 247.858);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.984 0.003 247.858);
+  --sidebar-accent: oklch(0.279 0.041 260.031);
+  --sidebar-accent-foreground: oklch(0.984 0.003 247.858);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.551 0.027 264.364);
 }
 
 @layer base {
@@ -96,85 +137,25 @@
     border-color: var(--color-border);
   }
 
-  html {
-    color-scheme: dark;
-    -webkit-tap-highlight-color: transparent;
+  html { scroll-padding-top: 4rem; }
+
+  body {
+    min-width: 320px;
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: "DM Sans", ui-sans-serif, system-ui, sans-serif;
   }
+
+  button, a, input { transition: transform 180ms cubic-bezier(0.23, 1, 0.32, 1), background-color 180ms ease, border-color 180ms ease, color 180ms ease, box-shadow 180ms ease; }
 
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
-    font-family: var(--font-sans);
-    -webkit-font-smoothing: antialiased;
   }
 
-  h1,
-  h2,
-  h3 {
-    letter-spacing: -0.02em;
+  button:active, a:active { transform: scale(0.98); }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
   }
-
-  ::selection {
-    background-color: color-mix(in oklch, var(--accent-green) 30%, transparent);
-  }
-}
-
-@utility nova-panel {
-  background-color: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  transition: border-color 200ms ease, background-color 200ms ease;
-}
-
-@utility nova-panel-hover {
-  &:hover {
-    border-color: var(--color-border-strong);
-    background-color: var(--color-surface-2);
-  }
-}
-
-@utility nova-label {
-  font-size: 0.6875rem;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--color-muted-foreground);
-}
-
-@utility no-scrollbar {
-  scrollbar-width: none;
-  &::-webkit-scrollbar {
-    display: none;
-  }
-}
-
-@utility nova-link {
-  color: var(--color-muted-foreground);
-  transition: color 200ms ease;
-  &:hover {
-    color: var(--color-foreground);
-  }
-}
-
-@utility nova-green {
-  color: var(--color-accent-green);
-}
-
-@layer components {
-  .fade-in {
-    animation: nova-fade-in 200ms ease-out;
-  }
-  .slide-up {
-    animation: nova-slide-up 250ms ease-out;
-  }
-}
-
-@keyframes nova-fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-@keyframes nova-slide-up {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
 }

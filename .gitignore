@@ -20,6 +20,20 @@ dist-ssr
 .wrangler/
 .dev.vars
 
+# Vibely (internal) — dev-server plumbing & build caches
+#
+# A PREFIX, not an enumeration. This list used to name the dotfiles one by one
+# and had already fallen behind twice: `.vibely-inspector-tagger.js` and
+# `.vibely-hmr-gate.js` are written into the workspace on every dev-server
+# launch and matched none of them, so they showed up as untracked files in the
+# user's own repository. The same rule is spelled `isVibelyInfraFile`
+# (sandbox/path-utils.ts) for the editor tree and git sync, and `**/.vibely-*`
+# in the watcher's ignore list — all three have to agree, and a glob is the only
+# form of this rule that cannot go stale.
+nohup.out
+*.tsbuildinfo
+.vibely-*
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -30,4 +44,3 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-.env

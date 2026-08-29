@@ -7,27 +7,22 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
-import { useEffect, type ReactNode } from "react";
-import { Toaster } from "@/components/ui/sonner";
-import { AuthProvider } from "@/hooks/useAuth";
-import { AppShell } from "@/components/nova/AppShell";
 
 import appCss from "../styles.css?url";
-import { reportLovableError } from "../lib/lovable-error-reporting";
 
 function NotFoundComponent() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="max-w-md text-center">
-        <h1 className="text-7xl font-black text-foreground">404</h1>
+        <h1 className="text-7xl font-bold text-foreground">404</h1>
         <h2 className="mt-4 text-xl font-semibold text-foreground">Page not found</h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          This NOVA page doesn't exist or has been moved.
+          The page you're looking for doesn't exist or has been moved.
         </p>
         <div className="mt-6">
           <Link
-            to="/"
-            className="inline-flex items-center justify-center rounded-sm bg-primary px-4 py-2 text-sm font-bold uppercase tracking-wider text-primary-foreground"
+            to={"/" as any}
+            className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
           >
             Go home
           </Link>
@@ -37,12 +32,29 @@ function NotFoundComponent() {
   );
 }
 
+// Loaders and server functions commonly throw a raw Response rather than an
+// Error. `String(it)` on one is the opaque "[object Response]", which is then all
+// the runtime-error card — and the agent's fix loop reading it — has to work
+// with, so pull out the status and URL instead.
+function describeBoundaryError(error: unknown): { message: string; stack: string } {
+  if (error instanceof Response) {
+    const url = error.url ? ` at ${error.url}` : "";
+    return { message: `Response ${error.status}${url}`, stack: "(no stack)" };
+  }
+  if (error instanceof Error) {
+    return { message: error.message, stack: error.stack ?? "(no stack)" };
+  }
+  return { message: String(error), stack: "(no stack)" };
+}
+
 function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
-  console.error(error);
+  // The single reporting channel: cloudflare/worker.js wraps console.error and
+  // beacons it to the editor. Deliberately NOT a second reporter module — see
+  // sandbox/vite-config-patcher.ts and sandbox/error-beacon.test.ts for the two
+  // production breakages that caused.
+  const { message, stack } = describeBoundaryError(error);
+  console.error("[render-boundary]", message, "\n", stack);
   const router = useRouter();
-  useEffect(() => {
-    reportLovableError(error, { boundary: "tanstack_root_error_component" });
-  }, [error]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
@@ -59,13 +71,13 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
               router.invalidate();
               reset();
             }}
-            className="inline-flex items-center justify-center rounded-sm bg-primary px-4 py-2 text-sm font-bold uppercase tracking-wider text-primary-foreground"
+            className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
           >
             Try again
           </button>
           <a
             href="/"
-            className="inline-flex items-center justify-center rounded-sm border border-border bg-background px-4 py-2 text-sm font-medium text-foreground"
+            className="inline-flex items-center justify-center rounded-md border border-input bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
           >
             Go home
           </a>
@@ -80,18 +92,26 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "NOVA — VRFS League Platform" },
-      {
-        name: "description",
-        content: "NOVA is the competitive VRFS league platform: fixtures, results, standings and teams.",
-      },
+      { title: "NOVA — VRFS Esports Football" },
+      { name: "description", content: "The professional home for VRFS football leagues, fixtures and statistics." },
+      { name: "author", content: "Vibely" },
+      { property: "og:title", content: "NOVA — VRFS Esports Football" },
+      { property: "og:description", content: "The professional home for VRFS football leagues, fixtures and statistics." },
       { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary_large_image" },
-      { name: "theme-color", content: "#0b0b0c" },
+      { name: "twitter:card", content: "summary" },
+      { name: "twitter:site", content: "@Vibely" },
     ],
     links: [
-      { rel: "stylesheet", href: appCss },
-      { rel: "icon", type: "image/png", href: "/favicon.png" },
+      {
+        rel: "stylesheet",
+        href: appCss,
+      },
+      // Without this the browser requests /favicon.ico on every page load and
+      // gets a 404 — harmless (it is already filtered as noise server-side) but
+      // it leaves every generated app with the browser's blank-page tab icon.
+      // SVG rather than .ico so it stays editable text the agent can restyle to
+      // match the app it just built.
+      { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },
     ],
   }),
   shellComponent: RootShell,
@@ -100,9 +120,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   errorComponent: ErrorComponent,
 });
 
-function RootShell({ children }: { children: ReactNode }) {
+function RootShell({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en">
       <head>
         <HeadContent />
       </head>
@@ -119,13 +139,7 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <AppShell>
-          {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-          <Outlet />
-        </AppShell>
-        <Toaster />
-      </AuthProvider>
+      <Outlet />
     </QueryClientProvider>
   );
 }
