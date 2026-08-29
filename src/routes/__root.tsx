@@ -111,7 +111,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       // it leaves every generated app with the browser's blank-page tab icon.
       // SVG rather than .ico so it stays editable text the agent can restyle to
       // match the app it just built.
-      { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },
+      { rel: "icon", href: "/nova-icon.jpeg", type: "image/jpeg" },
     ],
   }),
   shellComponent: RootShell,

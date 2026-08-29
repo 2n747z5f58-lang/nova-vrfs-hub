@@ -6,7 +6,13 @@ services:
       - ./:/app
     ports:
       - "3000:8080"
-    command: sh -c "npm install --no-audit --no-fund && npm run dev -- --host 0.0.0.0"
+    env_file:
+      - /run/base44/app.env
+    command: >
+      sh -c "npm install --no-audit --no-fund &&
+      export VITE_SUPABASE_URL="$${SUPABASE_URL}" &&
+      export VITE_SUPABASE_PUBLISHABLE_KEY="$${SUPABASE_PUBLISHABLE_KEY}" &&
+      npm run dev -- --host 0.0.0.0"
     environment:
       - NODE_ENV=development
     healthcheck:

@@ -2,5 +2,9 @@
   "previewPort": 3000,
   "healthPath": "/",
   "startCommand": "docker compose -f docker-compose.base44.yml up -d",
-  "secrets": []
+  "secrets": [
+    { "name": "SUPABASE_URL", "description": "Supabase project URL (e.g. https://<ref>.supabase.co). Aliased to VITE_SUPABASE_URL at runtime for the client.", "requiredAtBoot": false },
+    { "name": "SUPABASE_PUBLISHABLE_KEY", "description": "Supabase anon/publishable key. Aliased to VITE_SUPABASE_PUBLISHABLE_KEY at runtime for the client.", "requiredAtBoot": false },
+    { "name": "SUPABASE_SERVICE_ROLE_KEY", "description": "Supabase service-role key, used server-side only (process.env.SUPABASE_SERVICE_ROLE_KEY in client.server.ts).", "requiredAtBoot": false }
+  ]
 }

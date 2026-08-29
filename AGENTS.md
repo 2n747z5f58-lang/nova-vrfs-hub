@@ -17,19 +17,44 @@ of the repo, so edits hot-reload (Vite watcher uses polling — already configur
 - Healthcheck curls `http://localhost:8080/`; container goes healthy once Vite
   is ready (~1 min after first boot for `npm install`).
 
-## Secrets
-**None required to boot.** The app imports `@supabase/supabase-js` but the client
-(`src/integrations/supabase/client.ts`) falls back to `https://placeholder.supabase.co`
-when `VITE_SUPABASE_URL` / `VITE_SUPABASE_PUBLISHABLE_KEY` are absent, so importing
-it never crashes. Auth/data calls simply fail until a real Supabase project is
-linked. The index route calls `supabase.auth.getSession()` (reads local storage,
-no network) and redirects to `/auth` when there is no session — so the preview
-lands on the sign-in page by design.
+## Secrets / Supabase
+The app imports `@supabase/supabase-js`. The client (`src/integrations/supabase/client.ts`)
+falls back to `https://placeholder.supabase.co` when the URL/key are absent, so it
+boots without credentials — but auth/data won't work.
 
-If a real Supabase backend is later needed, add `VITE_SUPABASE_URL`,
-`VITE_SUPABASE_PUBLISHABLE_KEY` (and server-side `SUPABASE_SERVICE_ROLE_KEY`) via
-`set_secrets`; wire `/run/base44/app.env` into the `web` service as the last
-`env_file:` entry.
+A real Supabase project IS connected. The platform delivers three secrets to
+`/run/base44/app.env` (wired as the `web` service's `env_file`):
+`SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`.
+
+**Naming quirk — important:** the client/server code reads `VITE_SUPABASE_URL`
+and `VITE_SUPABASE_PUBLISHABLE_KEY` (Vite only exposes `VITE_`-prefixed vars to
+the browser via `import.meta.env`), but the saved secrets are named without the
+`VITE_` prefix. The compose `command` aliases them at runtime with double-quoted
+shell exports BEFORE `npm run dev`:
+`export VITE_SUPABASE_URL="$SUPABASE_URL"` (and the publishable key). Do NOT use
+single quotes — they suppress expansion and leave the literal `$SUPABASE_URL`,
+which the Supabase client rejects as an invalid URL (500 on every route).
+`SUPABASE_SERVICE_ROLE_KEY` needs no alias (server code reads it from
+`process.env` directly).
+
+After a secret change the platform recreates the service; otherwise `docker
+compose -f docker-compose.base44.yml up -d --force-recreate` re-applies the
+aliasing. Verify presence with `docker compose exec -T web sh -c 'printenv
+SUPABASE_URL >/dev/null && echo present'` (never print the value).
+
+## Auth / Discord OAuth
+- `/auth` renders the sign-in page with a "Continue with Discord" button
+  (`supabase.auth.signInWithOAuth({ provider: "discord" })`) and email/password.
+- `/auth-callback` (`src/routes/auth-callback.tsx`) completes the OAuth round-trip:
+  it calls `supabase.auth.exchangeCodeForSession(window.location.href)` and
+  redirects to `/` on success or `/auth` on failure. The repo originally
+  referenced `/auth-callback` as the OAuth redirect target but had no route for
+  it; this route was added to make the flow work.
+- The full Discord round-trip can't be exercised inside the preview iframe
+  (Discord blocks framing). The initiation is verifiable server-side: curl the
+  Supabase `/auth/v1/authorize?provider=discord` endpoint (with the publishable
+  key as `apikey`) — it returns a 302 to `https://discord.com/api/oauth2/authorize`.
+  The preview origin is accepted as the `redirect_to`.
 
 ## Verifying it works
 - `docker compose -f docker-compose.base44.yml ps` → `web` is `Up (healthy)`.
