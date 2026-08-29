@@ -4,13 +4,14 @@
 // __VIBELY_WATCH_POLL__ (user-configured)
 // __VIBELY_HMR_STREAM__ (already current)
 import { defineConfig } from "@vibelyai/vite-tanstack-config";
-
+import { cloudflare } from "@cloudflare/vite-plugin";
 export default defineConfig({
   // Pre-scan the real source so heavy deps (three, @react-three/*) are optimized on
   // the first pass, not discovered late through the virtual client entry — otherwise
   // the re-optimize 504s the in-flight client-entry import ("Failed to fetch
   // dynamically imported module") on a cold .vite cache.
   vite: {
+    plugins: [cloudflare({ viteEnvironment: { name: "ssr" } })],
     optimizeDeps: { entries: ["./src/**/*.{ts,tsx,js,jsx}"] },
     // Force ONE copy of React, whatever a dependency asks for.
     //
