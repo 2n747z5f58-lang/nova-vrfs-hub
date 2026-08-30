@@ -174,12 +174,17 @@ export function NovaSidebar({
             <LogIn className="size-4" />
             Sign out
           </button>
-        </div>
+                </div>
       </aside>
     </>
-  }
+  );
+}
 
 export function NovaHeader({
+  onMenu,
+}: {
+  onMenu: () => void;
+}) {
   onMenu,
 }: {
   onMenu: () => void;
