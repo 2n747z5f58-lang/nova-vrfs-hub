@@ -1,30 +1,35 @@
-import { createFileRoute, useState } from "@tanstack/react-router";
-import { FormEvent, useState as useReactState } from "react";
+import { createFileRoute } from "@tanstack/react-router";
+import { FormEvent, useState } from "react";
 import { ArrowRight, Loader2, Volume2 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "@/integrations/supabase/client";
 import { playUiSound } from "@/lib/sounds";
+
 export const Route = createFileRoute("/auth")({
   ssr: false,
   component: AuthPage,
 });
+
 function AuthPage() {
-  const [mode, setMode] = useReactState<"signin" | "signup">("signin");
-  const [email, setEmail] = useReactState("");
-  const [password, setPassword] = useReactState("");
-  const [busy, setBusy] = useReactState(false);
-  const [message, setMessage] = useReactState("");
-  const [error, setError] = useReactState("");
+  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
   async function submit(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
     setError("");
     setMessage("");
+
     if (!isSupabaseConfigured) {
       setError("Connect Supabase to enable sign-in.");
       setBusy(false);
       playUiSound("error");
       return;
     }
+
     const result =
       mode === "signin"
         ? await supabase.auth.signInWithPassword({
@@ -38,42 +43,51 @@ function AuthPage() {
               emailRedirectTo: `${window.location.origin}/profile-setup`,
             },
           });
+
     if (result.error) {
       setError(result.error.message);
-      playUiSound("error");
       setBusy(false);
+      playUiSound("error");
       return;
     }
+
     playUiSound("success");
+
     if (result.data.session) {
       window.location.href = "/profile-setup";
     } else {
       setMessage("Check your email to confirm your account.");
     }
+
     setBusy(false);
   }
+
   async function signInWithDiscord() {
     setBusy(true);
     setError("");
     setMessage("");
+
     if (!isSupabaseConfigured) {
       setError("Connect Supabase to enable Discord sign-in.");
       setBusy(false);
       playUiSound("error");
       return;
     }
+
     const { error: oauthError } = await supabase.auth.signInWithOAuth({
       provider: "discord",
       options: {
         redirectTo: `${window.location.origin}/profile-setup`,
       },
     });
+
     if (oauthError) {
       setError(oauthError.message);
       setBusy(false);
       playUiSound("error");
     }
   }
+
   return (
     <main className="flex min-h-screen items-center justify-center bg-background px-5 py-10">
       <div className="w-full max-w-md">
@@ -83,16 +97,20 @@ function AuthPage() {
           </span>
           <span className="font-black tracking-[0.28em]">NOVA</span>
         </div>
+
         <p className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
           VRFS / Secure access
         </p>
+
         <h1 className="text-4xl font-bold tracking-tight">
           {mode === "signin" ? "Welcome back." : "Create your account."}
         </h1>
+
         <p className="mt-3 text-sm leading-6 text-muted-foreground">
           Access league operations, fixtures and player statistics from one
           professional workspace.
         </p>
+
         <button
           type="button"
           onClick={signInWithDiscord}
@@ -104,11 +122,13 @@ function AuthPage() {
           </span>
           Continue with Discord
         </button>
+
         <div className="my-6 flex items-center gap-3 text-xs text-muted-foreground">
           <span className="h-px flex-1 bg-border" />
           <span>or continue with email</span>
           <span className="h-px flex-1 bg-border" />
         </div>
+
         <form onSubmit={submit} className="space-y-5">
           <div>
             <label
@@ -117,6 +137,7 @@ function AuthPage() {
             >
               Email address
             </label>
+
             <input
               id="email"
               type="email"
@@ -126,6 +147,7 @@ function AuthPage() {
               className="h-12 w-full rounded-lg border border-input bg-card px-4 text-sm outline-none focus:border-foreground"
             />
           </div>
+
           <div>
             <label
               htmlFor="password"
@@ -133,6 +155,7 @@ function AuthPage() {
             >
               Password
             </label>
+
             <input
               id="password"
               type="password"
@@ -143,16 +166,19 @@ function AuthPage() {
               className="h-12 w-full rounded-lg border border-input bg-card px-4 text-sm outline-none focus:border-foreground"
             />
           </div>
+
           {error && (
             <p role="alert" className="text-sm text-red-400">
               {error}
             </p>
           )}
+
           {message && (
             <p role="status" className="text-sm text-muted-foreground">
               {message}
             </p>
           )}
+
           <button
             disabled={busy}
             className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-primary font-semibold text-primary-foreground shadow-lg shadow-black/20 hover:opacity-90 disabled:opacity-60"
@@ -160,11 +186,14 @@ function AuthPage() {
             {busy ? (
               <Loader2 className="size-4 animate-spin" />
             ) : (
-              mode === "signin" ? "Sign in" : "Create account"
+              <>
+                {mode === "signin" ? "Sign in" : "Create account"}
+                <ArrowRight className="size-4" />
+              </>
             )}
-            <ArrowRight className="size-4" />
           </button>
         </form>
+
         <button
           onClick={() => {
             setMode(mode === "signin" ? "signup" : "signin");
@@ -177,6 +206,7 @@ function AuthPage() {
             ? "Need an account? Create one"
             : "Already have an account? Sign in"}
         </button>
+
         <p className="mt-10 flex items-center gap-2 text-xs text-muted-foreground">
           <Volume2 className="size-3" />
           Interface sounds are controlled in your profile.
