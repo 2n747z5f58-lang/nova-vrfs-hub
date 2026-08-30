@@ -1,5 +1,10 @@
 import "dotenv/config";
-import { Client, GatewayIntentBits } from "discord.js";
+import {
+  Client,
+  Events,
+  GatewayIntentBits,
+} from "discord.js";
+import { handleCommand } from "./commands.js";
 
 const token = process.env.DISCORD_TOKEN;
 
@@ -11,8 +16,30 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds],
 });
 
-client.once("ready", () => {
-  console.log(`NOVA is online as ${client.user?.tag}`);
+client.once(Events.ClientReady, (readyClient) => {
+  console.log(`NOVA is online as ${readyClient.user.tag}`);
+});
+
+client.on(Events.InteractionCreate, async (interaction) => {
+  if (!interaction.isChatInputCommand()) return;
+
+  try {
+    await handleCommand(interaction);
+  } catch (error) {
+    console.error("Command error:", error);
+
+    if (interaction.replied || interaction.deferred) {
+      await interaction.followUp({
+        content: "Something went wrong while running that command.",
+        ephemeral: true,
+      });
+    } else {
+      await interaction.reply({
+        content: "Something went wrong while running that command.",
+        ephemeral: true,
+      });
+    }
+  }
 });
 
 client.login(token);
