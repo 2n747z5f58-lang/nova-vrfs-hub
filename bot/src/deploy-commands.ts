@@ -1,36 +1,35 @@
-import "dotenv/config";
-import {
-  REST,
-  Routes,
-  SlashCommandBuilder,
-} from "discord.js";
-
-const token = process.env.DISCORD_TOKEN;
-const clientId = process.env.DISCORD_CLIENT_ID;
-const guildId = process.env.DISCORD_GUILD_ID;
-
-if (!token || !clientId || !guildId) {
-  throw new Error(
-    "DISCORD_TOKEN, DISCORD_CLIENT_ID and DISCORD_GUILD_ID are required.",
-  );
-}
-
 const commands = [
   new SlashCommandBuilder()
     .setName("setup")
-    .setDescription("Set up a NOVA league"),
+    .setDescription("Create and connect a NOVA league")
+    .addStringOption((o) =>
+      o.setName("league")
+        .setDescription("League name")
+        .setRequired(true),
+    )
+    .addStringOption((o) =>
+      o.setName("division1")
+        .setDescription("Division 1")
+        .setRequired(true),
+    )
+    .addStringOption((o) =>
+      o.setName("division2")
+        .setDescription("Optional Division 2")
+        .setRequired(false),
+    )
+    .addStringOption((o) =>
+      o.setName("division3")
+        .setDescription("Optional Division 3")
+        .setRequired(false),
+    ),
 
   new SlashCommandBuilder()
     .setName("addteam")
-    .setDescription("Add a team to a NOVA league"),
-
-  new SlashCommandBuilder()
-    .setName("removeteam")
-    .setDescription("Remove a team from a NOVA league"),
+    .setDescription("Add a team to your league"),
 
   new SlashCommandBuilder()
     .setName("makedivision")
-    .setDescription("Create a league division"),
+    .setDescription("Create a division"),
 
   new SlashCommandBuilder()
     .setName("startdivision")
@@ -45,19 +44,14 @@ const commands = [
     .setDescription("Submit a match result"),
 
   new SlashCommandBuilder()
-    .setName("profile")
-    .setDescription("View a player's profile"),
+    .setName("setcooverseer")
+    .setDescription("Add a Co-Overseer"),
 
   new SlashCommandBuilder()
-    .setName("table")
-    .setDescription("Generate the current league table"),
+    .setName("removeoverseer")
+    .setDescription("Remove a Co-Overseer"),
+
+  new SlashCommandBuilder()
+    .setName("transferleague")
+    .setDescription("Transfer league ownership"),
 ].map((command) => command.toJSON());
-
-const rest = new REST({ version: "10" }).setToken(token);
-
-await rest.put(
-  Routes.applicationGuildCommands(clientId, guildId),
-  { body: commands },
-);
-
-console.log("NOVA slash commands registered.");
