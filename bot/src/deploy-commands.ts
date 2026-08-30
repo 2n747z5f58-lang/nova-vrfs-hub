@@ -6,11 +6,10 @@ import {
 
 const token = process.env.DISCORD_BOT_TOKEN;
 const clientId = process.env.DISCORD_CLIENT_ID;
-const guildId = process.env.DISCORD_GUILD_ID;
 
-if (!token || !clientId || !guildId) {
+if (!token || !clientId) {
   throw new Error(
-    "DISCORD_BOT_TOKEN, DISCORD_CLIENT_ID and DISCORD_GUILD_ID are required.",
+    "DISCORD_BOT_TOKEN and DISCORD_CLIENT_ID are required.",
   );
 }
 
@@ -79,8 +78,10 @@ const commands = [
 const rest = new REST({ version: "10" }).setToken(token);
 
 try {
+  console.log("Registering NOVA slash commands globally...");
+
   await rest.put(
-    Routes.applicationGuildCommands(clientId, guildId),
+    Routes.applicationCommands(clientId),
     { body: commands },
   );
 
