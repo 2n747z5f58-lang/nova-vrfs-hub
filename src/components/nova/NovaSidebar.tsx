@@ -174,7 +174,7 @@ export function NovaSidebar({
             <LogIn className="size-4" />
             Sign out
           </button>
-                </div>
+        </div>
       </aside>
     </>
   );
@@ -185,14 +185,7 @@ export function NovaHeader({
 }: {
   onMenu: () => void;
 }) {
-  onMenu,
-}: {
-  onMenu: () => void;
-}) {
   const [profile, setProfile] = useState<HeaderProfile | null>(null);
-  const [search, setSearch] = useState("");
-  const [results, setResults] = useState<HeaderProfile[]>([]);
-  const [searching, setSearching] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -222,44 +215,6 @@ export function NovaHeader({
     };
   }, []);
 
-  useEffect(() => {
-    const query = search.trim();
-
-    if (query.length < 2) {
-      setResults([]);
-      setSearching(false);
-      return;
-    }
-
-    let cancelled = false;
-
-    async function searchProfiles() {
-      setSearching(true);
-
-      const { data } = await supabase
-        .from("profiles")
-        .select("display_name, username, avatar_url")
-        .or(
-          `username.ilike.%${query}%,display_name.ilike.%${query}%`,
-        )
-        .limit(6);
-
-      if (!cancelled) {
-        setResults((data ?? []) as HeaderProfile[]);
-        setSearching(false);
-      }
-    }
-
-    const timeout = window.setTimeout(() => {
-      void searchProfiles();
-    }, 250);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timeout);
-    };
-  }, [search]);
-
   const nameForInitials =
     profile?.display_name?.trim() ||
     profile?.username?.trim() ||
@@ -287,78 +242,10 @@ export function NovaHeader({
         <Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
 
         <input
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
           aria-label="Search teams, players, leagues or matches"
           placeholder="Search teams, players, leagues..."
           className="h-10 w-full rounded-lg border border-border bg-card pl-10 pr-4 text-sm outline-none placeholder:text-muted-foreground focus:border-foreground"
         />
-
-        {search.trim().length >= 2 && (
-          <div className="absolute left-0 right-0 top-12 overflow-hidden rounded-lg border border-border bg-card shadow-2xl">
-            {searching ? (
-              <div className="px-4 py-4 text-sm text-muted-foreground">
-                Searching...
-              </div>
-            ) : results.length > 0 ? (
-              <div className="py-1">
-                {results.map((result) => {
-                  const resultName =
-                    result.display_name ||
-                    result.username ||
-                    "NOVA User";
-
-                  const resultInitials = resultName
-                    .split(/\s+/)
-                    .filter(Boolean)
-                    .slice(0, 2)
-                    .map((part) => part.charAt(0))
-                    .join("")
-                    .toUpperCase();
-
-                  return (
-                    <Link
-                      key={result.username}
-                      to={`/users/${result.username}` as any}
-                      onClick={() => {
-                        playUiSound();
-                        setSearch("");
-                        setResults([]);
-                      }}
-                      className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-white/5"
-                    >
-                      <div className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-full border border-border bg-background text-xs font-bold">
-                        {result.avatar_url ? (
-                          <img
-                            src={result.avatar_url}
-                            alt={resultName}
-                            className="size-full object-cover"
-                          />
-                        ) : (
-                          <span>{resultInitials}</span>
-                        )}
-                      </div>
-
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold">
-                          {resultName}
-                        </p>
-
-                        <p className="truncate text-xs text-muted-foreground">
-                          @{result.username}
-                        </p>
-                      </div>
-                    </Link>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="px-4 py-4 text-sm text-muted-foreground">
-                No users found.
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
       <div className="ml-auto flex items-center gap-4">
@@ -392,5 +279,3 @@ export function NovaHeader({
     </header>
   );
 }
-}
-
