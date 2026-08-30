@@ -70,6 +70,18 @@ async function setup(interaction: ChatInputCommandInteraction) {
   const division2 = interaction.options.getString("division2");
   const division3 = interaction.options.getString("division3");
 
+  const slug = leagueName
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  const divisions = [
+    division1,
+    division2,
+    division3,
+  ].filter((division): division is string => Boolean(division));
+
   const { data: existing, error: existingError } = await supabase
     .from("guild_settings")
     .select("*")
@@ -77,7 +89,7 @@ async function setup(interaction: ChatInputCommandInteraction) {
     .maybeSingle();
 
   if (existingError) {
-    console.error(existingError);
+    console.error("Guild lookup error:", existingError);
     return interaction.editReply(
       "❌ Couldn't check NOVA's database.",
     );
@@ -89,37 +101,39 @@ async function setup(interaction: ChatInputCommandInteraction) {
     );
   }
 
-  const { error: guildError } = await supabase
-    .from("guild_settings")
-    .insert({
-      guild_id: guildId,
-    });
-
-  if (guildError) {
-    console.error(guildError);
-    return interaction.editReply(
-      "❌ Couldn't register this server with NOVA.",
-    );
-  }
-
-  const divisions = [
-    division1,
-    division2,
-    division3,
-  ].filter(Boolean);
-
   const { data: league, error: leagueError } = await supabase
     .from("leagues")
     .insert({
       name: leagueName,
+      slug,
     })
     .select()
     .single();
 
   if (leagueError) {
-    console.error(leagueError);
+    console.error("League creation error:", leagueError);
     return interaction.editReply(
-      "❌ Server connected, but the league couldn't be created.",
+      "❌ The league couldn't be created.",
+    );
+  }
+
+  const { error: guildError } = await supabase
+    .from("guild_settings")
+    .insert({
+      guild_id: guildId,
+      league_id: league.id,
+    });
+
+  if (guildError) {
+    console.error("Guild connection error:", guildError);
+
+    await supabase
+      .from("leagues")
+      .delete()
+      .eq("id", league.id);
+
+    return interaction.editReply(
+      "❌ League created, but the Discord server couldn't be connected.",
     );
   }
 
@@ -132,7 +146,7 @@ async function setup(interaction: ChatInputCommandInteraction) {
       });
 
     if (error) {
-      console.error(error);
+      console.error(`Division ${i + 1} creation error:`, error);
     }
   }
 
