@@ -20,7 +20,7 @@ export async function handleCommand(
     case "setup":
       return setup(interaction);
     case "addteam":
-      return simple(interaction, "addteam");
+      return addTeam(interaction);
     case "makedivision":
       return simple(interaction, "makedivision");
     case "startdivision":
@@ -119,7 +119,7 @@ async function setup(
       })
       .select()
       .single();
-  if (leagueError) {
+  if (leagueError || !league) {
     console.error(
       "League creation error:",
       leagueError,
@@ -175,13 +175,129 @@ async function setup(
       `🌐 Manage the rest through NOVA.`,
   );
 }
+async function addTeam(
+  interaction: ChatInputCommandInteraction,
+) {
+  if (!interaction.guildId) {
+    return interaction.reply({
+      content: "❌ Use `/addteam` inside a server.",
+      ephemeral: true,
+    });
+  }
+  if (
+    !interaction.memberPermissions?.has(
+      PermissionFlagsBits.Administrator,
+    )
+  ) {
+    return interaction.reply({
+      content:
+        "❌ You need Administrator permission to add teams.",
+      ephemeral: true,
+    });
+  }
+  await interaction.deferReply({ ephemeral: true });
+  const guildId = interaction.guildId;
+  const teamName = interaction.options.getString(
+    "team",
+    true,
+  );
+  const divisionName = interaction.options.getString(
+    "division",
+    true,
+  );
+  const logo = interaction.options.getAttachment(
+    "logo",
+  );
+  const { data: settings, error: settingsError } =
+    await supabase
+      .from("guild_settings")
+      .select("league_id")
+      .eq("guild_id", guildId)
+      .maybeSingle();
+  if (settingsError) {
+    console.error(
+      "Settings lookup error:",
+      settingsError,
+    );
+    return interaction.editReply(
+      "❌ Couldn't check the server connection.",
+    );
+  }
+  if (!settings?.league_id) {
+    return interaction.editReply(
+      "❌ This server isn't connected to a league.",
+    );
+  }
+  const { data: division, error: divisionError } =
+    await supabase
+      .from("divisions")
+      .select("id")
+      .eq("league_id", settings.league_id)
+      .ilike("name", divisionName)
+      .maybeSingle();
+  if (divisionError) {
+    console.error(
+      "Division lookup error:",
+      divisionError,
+    );
+    return interaction.editReply(
+      "❌ Couldn't find that division.",
+    );
+  }
+  if (!division) {
+    return interaction.editReply(
+      `❌ Division **${divisionName}** doesn't exist in this league.`,
+    );
+  }
+  const { data: existingTeam, error: teamLookupError } =
+    await supabase
+      .from("teams")
+      .select("id")
+      .eq("name", teamName)
+      .maybeSingle();
+  if (teamLookupError) {
+    console.error(
+      "Team lookup error:",
+      teamLookupError,
+    );
+    return interaction.editReply(
+      "❌ Couldn't check whether that team already exists.",
+    );
+  }
+  if (existingTeam) {
+    return interaction.editReply(
+      `❌ **${teamName}** already exists.`,
+    );
+  }
+  const { error: teamError } =
+    await supabase
+      .from("teams")
+      .insert({
+        name: teamName,
+        division_id: division.id,
+        logo_url: logo?.url ?? null,
+      });
+  if (teamError) {
+    console.error(
+      "Team creation error:",
+      teamError,
+    );
+    return interaction.editReply(
+      "❌ Couldn't create the team.",
+    );
+  }
+  return interaction.editReply(
+    `✅ **${teamName}** has been added to **${divisionName}**!` +
+      (logo ? "\n🖼️ Logo saved." : ""),
+  );
+}
 async function simple(
   interaction: ChatInputCommandInteraction,
   command: string,
 ) {
   return interaction.reply({
     content:
-      `🛠️ **/${command}** is registered and ready to be connected to NOVA's league permissions.`,
+      `🛠️ **/${command}** is registered and ready to be connected to NOVA.`,
     ephemeral: true,
   });
 }
@@ -217,7 +333,25 @@ const commands = [
     ),
   new SlashCommandBuilder()
     .setName("addteam")
-    .setDescription("Add a team to your league"),
+    .setDescription("Add a team to your league")
+    .addStringOption((option) =>
+      option
+        .setName("team")
+        .setDescription("Team name")
+        .setRequired(true),
+    )
+    .addStringOption((option) =>
+      option
+        .setName("division")
+        .setDescription("Division name")
+        .setRequired(true),
+    )
+    .addAttachmentOption((option) =>
+      option
+        .setName("logo")
+        .setDescription("Team logo image")
+        .setRequired(false),
+    ),
   new SlashCommandBuilder()
     .setName("makedivision")
     .setDescription("Create a division"),
