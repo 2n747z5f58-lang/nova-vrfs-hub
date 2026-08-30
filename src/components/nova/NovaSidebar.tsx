@@ -253,7 +253,7 @@ export function NovaHeader({
               ? `@${profile.username}`
               : "Profile",
             avatar_url: profile.avatar_url,
-            route: `/profile/${profile.username || profile.id}`,
+            route: `/users/${profile.username}`,
           });
         }
       }
