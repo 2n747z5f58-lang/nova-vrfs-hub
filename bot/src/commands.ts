@@ -9,30 +9,50 @@ export async function handleCommand(
 ) {
   switch (interaction.commandName) {
     case "setup":
-      await setupCommand(interaction);
-      break;
+      return setup(interaction);
+
+    case "addteam":
+      return simple(interaction, "addteam");
+
+    case "makedivision":
+      return simple(interaction, "makedivision");
+
+    case "startdivision":
+      return simple(interaction, "startdivision");
+
+    case "enddivision":
+      return simple(interaction, "enddivision");
+
+    case "submitresult":
+      return simple(interaction, "submitresult");
+
+    case "setcooverseer":
+      return simple(interaction, "setcooverseer");
+
+    case "removeoverseer":
+      return simple(interaction, "removeoverseer");
+
+    case "transferleague":
+      return simple(interaction, "transferleague");
 
     default:
-      await interaction.reply({
-        content: "That NOVA command isn't ready yet.",
+      return interaction.reply({
+        content: "❌ Unknown NOVA command.",
         ephemeral: true,
       });
   }
 }
 
-async function setupCommand(
-  interaction: ChatInputCommandInteraction,
-) {
-  const isAdmin = interaction.memberPermissions?.has(
-    PermissionFlagsBits.Administrator,
-  );
-
-  if (!isAdmin) {
-    await interaction.reply({
+async function setup(interaction: ChatInputCommandInteraction) {
+  if (
+    !interaction.memberPermissions?.has(
+      PermissionFlagsBits.Administrator,
+    )
+  ) {
+    return interaction.reply({
       content: "❌ You need Administrator permission to use `/setup`.",
       ephemeral: true,
     });
-    return;
   }
 
   await interaction.deferReply({ ephemeral: true });
@@ -40,50 +60,99 @@ async function setupCommand(
   const guildId = interaction.guildId;
 
   if (!guildId) {
-    await interaction.editReply("❌ This command can only be used inside a server.");
-    return;
+    return interaction.editReply(
+      "❌ `/setup` can only be used inside a server.",
+    );
   }
 
-  const { data, error } = await supabase
+  const leagueName = interaction.options.getString("league", true);
+  const division1 = interaction.options.getString("division1", true);
+  const division2 = interaction.options.getString("division2");
+  const division3 = interaction.options.getString("division3");
+
+  const { data: existing, error: existingError } = await supabase
     .from("guild_settings")
     .select("*")
     .eq("guild_id", guildId)
     .maybeSingle();
 
-  if (error) {
-    console.error("Supabase setup error:", error);
-
-    await interaction.editReply(
-      "❌ I couldn't connect to the NOVA database. Check the bot's Supabase configuration.",
+  if (existingError) {
+    console.error(existingError);
+    return interaction.editReply(
+      "❌ Couldn't check NOVA's database.",
     );
-    return;
   }
 
-  if (data) {
-    await interaction.editReply(
-      "⚠️ **NOVA is already configured for this server.**",
+  if (existing) {
+    return interaction.editReply(
+      "⚠️ This Discord server is already connected to NOVA.",
     );
-    return;
   }
 
-  const { error: insertError } = await supabase
+  const { error: guildError } = await supabase
     .from("guild_settings")
     .insert({
       guild_id: guildId,
     });
 
-  if (insertError) {
-    console.error("Supabase insert error:", insertError);
-
-    await interaction.editReply(
-      "❌ I couldn't save this server to NOVA.",
+  if (guildError) {
+    console.error(guildError);
+    return interaction.editReply(
+      "❌ Couldn't register this server with NOVA.",
     );
-    return;
+  }
+
+  const divisions = [
+    division1,
+    division2,
+    division3,
+  ].filter(Boolean);
+
+  const { data: league, error: leagueError } = await supabase
+    .from("leagues")
+    .insert({
+      name: leagueName,
+    })
+    .select()
+    .single();
+
+  if (leagueError) {
+    console.error(leagueError);
+    return interaction.editReply(
+      "❌ Server connected, but the league couldn't be created.",
+    );
+  }
+
+  for (let i = 0; i < divisions.length; i++) {
+    const { error } = await supabase
+      .from("divisions")
+      .insert({
+        league_id: league.id,
+        name: divisions[i],
+      });
+
+    if (error) {
+      console.error(error);
+    }
   }
 
   await interaction.editReply(
-    "✅ **NOVA has been connected to this server.**\n\n" +
-      "The server is now registered with NOVA. " +
-      "League and division configuration comes next.",
+    `✅ **${leagueName}** has been created.\n\n` +
+      `🥇 Division 1: ${division1}\n` +
+      (division2 ? `🥈 Division 2: ${division2}\n` : "") +
+      (division3 ? `🥉 Division 3: ${division3}\n` : "") +
+      `\n👑 You are now the primary Overseer for this league.\n` +
+      `🌐 Manage the rest through NOVA.`,
   );
+}
+
+async function simple(
+  interaction: ChatInputCommandInteraction,
+  command: string,
+) {
+  await interaction.reply({
+    content:
+      `🛠️ **/${command}** is registered and ready to be connected to NOVA's league permissions.`,
+    ephemeral: true,
+  });
 }
