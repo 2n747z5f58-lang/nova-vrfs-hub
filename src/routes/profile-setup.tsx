@@ -16,8 +16,18 @@ function ProfileSetup() {
   async function saveProfile() {
     setError("");
 
-    if (!username.trim() || !displayName.trim()) {
+    const cleanUsername = username.trim().toLowerCase();
+    const cleanDisplayName = displayName.trim();
+
+    if (!cleanUsername || !cleanDisplayName) {
       setError("Please enter a username and display name.");
+      return;
+    }
+
+    if (!/^[a-z0-9_]{3,20}$/.test(cleanUsername)) {
+      setError(
+        "Username must be 3–20 characters and only use letters, numbers, or underscores."
+      );
       return;
     }
 
@@ -33,16 +43,29 @@ function ProfileSetup() {
       return;
     }
 
+    const { data: existingProfile } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("username", cleanUsername)
+      .neq("id", user.id)
+      .maybeSingle();
+
+    if (existingProfile) {
+      setError("That username is already taken.");
+      setLoading(false);
+      return;
+    }
+
     const { error: updateError } = await supabase
       .from("profiles")
       .upsert({
         id: user.id,
-        username: username.trim(),
-        display_name: displayName.trim(),
+        username: cleanUsername,
+        display_name: cleanDisplayName,
       });
 
     if (updateError) {
-      setError(updateError.message);
+      setError("Could not save your profile. Please try again.");
       setLoading(false);
       return;
     }
@@ -57,6 +80,7 @@ function ProfileSetup() {
           <span className="grid size-10 place-items-center bg-primary text-primary-foreground font-black">
             N
           </span>
+
           <span className="font-black tracking-[0.28em]">NOVA</span>
         </div>
 
@@ -86,8 +110,13 @@ function ProfileSetup() {
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               placeholder="yourusername"
+              maxLength={20}
               className="h-12 w-full rounded-lg border border-input bg-card px-4 text-sm outline-none focus:border-foreground"
             />
+
+            <p className="mt-2 text-xs text-muted-foreground">
+              3–20 characters. Letters, numbers and underscores only.
+            </p>
           </div>
 
           <div>
@@ -103,6 +132,7 @@ function ProfileSetup() {
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               placeholder="Your Display Name"
+              maxLength={40}
               className="h-12 w-full rounded-lg border border-input bg-card px-4 text-sm outline-none focus:border-foreground"
             />
           </div>
