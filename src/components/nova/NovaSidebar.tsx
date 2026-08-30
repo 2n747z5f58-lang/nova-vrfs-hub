@@ -177,7 +177,9 @@ export function NovaSidebar({
         </div>
       </aside>
     </>
-  )export function NovaHeader({
+  }
+
+export function NovaHeader({
   onMenu,
 }: {
   onMenu: () => void;
