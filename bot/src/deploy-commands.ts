@@ -2,6 +2,7 @@ import {
   REST,
   Routes,
   SlashCommandBuilder,
+  SlashCommandStringOption,
 } from "discord.js";
 
 const token = process.env.DISCORD_BOT_TOKEN;
@@ -18,25 +19,25 @@ const commands = [
   new SlashCommandBuilder()
     .setName("setup")
     .setDescription("Create and connect a NOVA league")
-    .addStringOption((option) =>
+    .addStringOption((option: SlashCommandStringOption) =>
       option
         .setName("league")
         .setDescription("League name")
         .setRequired(true),
     )
-    .addStringOption((option) =>
+    .addStringOption((option: SlashCommandStringOption) =>
       option
         .setName("division1")
         .setDescription("Division 1")
         .setRequired(true),
     )
-    .addStringOption((option) =>
+    .addStringOption((option: SlashCommandStringOption) =>
       option
         .setName("division2")
         .setDescription("Optional Division 2")
         .setRequired(false),
     )
-    .addStringOption((option) =>
+    .addStringOption((option: SlashCommandStringOption) =>
       option
         .setName("division3")
         .setDescription("Optional Division 3")
