@@ -31,6 +31,12 @@ const links = [
   ["Notifications", "/notifications", Bell],
 ] as const;
 
+type HeaderProfile = {
+  display_name: string | null;
+  username: string | null;
+  avatar_url: string | null;
+};
+
 export function NovaSidebar({
   mobileOpen,
   onClose,
@@ -179,6 +185,49 @@ export function NovaHeader({
 }: {
   onMenu: () => void;
 }) {
+  const [profile, setProfile] = useState<HeaderProfile | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function loadProfile() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user || !mounted) return;
+
+      const { data } = await supabase
+        .from("profiles")
+        .select("display_name, username, avatar_url")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (mounted && data) {
+        setProfile(data as HeaderProfile);
+      }
+    }
+
+    void loadProfile();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const nameForInitials =
+    profile?.display_name?.trim() ||
+    profile?.username?.trim() ||
+    "NOVA";
+
+  const initials = nameForInitials
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part.charAt(0))
+    .join("")
+    .toUpperCase();
+
   return (
     <header className="sticky top-0 z-30 flex h-20 items-center justify-between border-b border-border bg-sidebar/95 px-5 backdrop-blur lg:px-8">
       <button
@@ -210,9 +259,17 @@ export function NovaHeader({
         <Link
           to={"/profile" as any}
           aria-label="Open profile"
-          className="grid size-9 place-items-center rounded-lg border border-border bg-card text-xs font-bold transition-all duration-200 hover:-translate-y-0.5 hover:border-foreground"
+          className="grid size-9 place-items-center overflow-hidden rounded-full border border-border bg-card text-xs font-bold transition-all duration-200 hover:-translate-y-0.5 hover:border-foreground"
         >
-          N
+          {profile?.avatar_url ? (
+            <img
+              src={profile.avatar_url}
+              alt={profile.display_name || profile.username || "Profile"}
+              className="size-full object-cover"
+            />
+          ) : (
+            <span>{initials}</span>
+          )}
         </Link>
       </div>
     </header>
