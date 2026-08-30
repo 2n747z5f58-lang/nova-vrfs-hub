@@ -6,24 +6,41 @@ import {
 export async function handleCommand(
   interaction: ChatInputCommandInteraction,
 ) {
-  if (interaction.commandName === "setup") {
-    if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+  switch (interaction.commandName) {
+    case "setup":
+      await setupCommand(interaction);
+      break;
+
+    default:
       await interaction.reply({
-        content: "You need the Discord Administrator permission to use this.",
+        content: "That NOVA command isn't ready yet.",
         ephemeral: true,
       });
-      return;
-    }
+  }
+}
 
+async function setupCommand(
+  interaction: ChatInputCommandInteraction,
+) {
+  const isAdmin = interaction.memberPermissions?.has(
+    PermissionFlagsBits.Administrator,
+  );
+
+  if (!isAdmin) {
     await interaction.reply({
-      content: "NOVA setup is ready. League configuration will be connected next.",
+      content: "❌ You need Administrator permission to use `/setup`.",
       ephemeral: true,
     });
+
     return;
   }
 
   await interaction.reply({
-    content: "That NOVA command isn't implemented yet.",
+    content:
+      "🛠️ **NOVA Setup**\n\n" +
+      "The league setup system is being connected to the NOVA database.\n\n" +
+      "Once connected, `/setup` will configure your league, divisions, " +
+      "fixture settings and Discord channels.",
     ephemeral: true,
   });
 }
