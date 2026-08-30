@@ -22,10 +22,15 @@ export function NotificationListener() {
         data: { user },
       } = await supabase.auth.getUser();
 
-      if (!user) return;
+      if (!user) {
+        console.log("NOVA notifications: no signed-in user");
+        return;
+      }
+
+      console.log("NOVA notifications: listening for", user.id);
 
       channel = supabase
-        .channel(`notifications-${user.id}`)
+        .channel(`nova-notifications-${user.id}`)
         .on(
           "postgres_changes",
           {
@@ -35,10 +40,13 @@ export function NotificationListener() {
             filter: `user_id=eq.${user.id}`,
           },
           (payload) => {
+            console.log("NOVA notification received:", payload.new);
             setNotification(payload.new as Notification);
           },
         )
-        .subscribe();
+        .subscribe((status) => {
+          console.log("NOVA notification realtime:", status);
+        });
     }
 
     void startListener();
@@ -53,7 +61,7 @@ export function NotificationListener() {
   if (!notification) return null;
 
   return (
-    <div className="fixed bottom-5 right-5 z-[100] w-[calc(100vw-2.5rem)] max-w-sm animate-in slide-in-from-right-5 fade-in duration-300">
+    <div className="fixed bottom-5 right-5 z-[9999] w-[calc(100vw-2.5rem)] max-w-sm animate-in slide-in-from-right-5 fade-in duration-300">
       <div className="rounded-xl border border-border bg-card p-4 shadow-2xl">
         <div className="flex items-start gap-3">
           <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground">
@@ -61,7 +69,9 @@ export function NotificationListener() {
           </div>
 
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold">{notification.title}</p>
+            <p className="text-sm font-semibold text-foreground">
+              {notification.title}
+            </p>
 
             <p className="mt-1 text-sm leading-5 text-muted-foreground">
               {notification.message}
@@ -78,7 +88,7 @@ export function NotificationListener() {
           <button
             aria-label="Dismiss notification"
             onClick={() => setNotification(null)}
-            className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             <X className="size-4" />
           </button>
