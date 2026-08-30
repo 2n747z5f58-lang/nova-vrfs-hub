@@ -186,6 +186,7 @@ export function NovaHeader({
   onMenu: () => void;
 }) {
   const [profile, setProfile] = useState<HeaderProfile | null>(null);
+  const [search, setSearch] = useState("");
 
   useEffect(() => {
     let mounted = true;
@@ -229,52 +230,70 @@ export function NovaHeader({
     .toUpperCase();
 
   return (
-    <header className="sticky top-0 z-30 flex h-20 items-center justify-between border-b border-border bg-sidebar/95 px-5 backdrop-blur lg:px-8">
-      <button
-        aria-label="Open navigation"
-        onClick={onMenu}
-        className="rounded-md p-2 lg:hidden"
-      >
-        <LayoutGrid className="size-5" />
-      </button>
-
-      <div className="relative hidden w-full max-w-md lg:block">
-        <Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
-
-        <input
-          aria-label="Search teams, players, leagues or matches"
-          placeholder="Search teams, players, leagues..."
-          className="h-10 w-full rounded-lg border border-border bg-card pl-10 pr-4 text-sm outline-none placeholder:text-muted-foreground focus:border-foreground"
-        />
-      </div>
-
-      <div className="ml-auto flex items-center gap-4">
+    <header className="sticky top-0 z-30 border-b border-border bg-sidebar/95 px-4 backdrop-blur sm:px-5 lg:px-8">
+      <div className="flex h-16 items-center gap-3">
         <button
-          aria-label="Notifications"
-          className="rounded-md p-2 text-muted-foreground transition-all duration-200 hover:bg-white/10 hover:text-foreground"
+          aria-label="Open navigation"
+          onClick={onMenu}
+          className="rounded-md p-2 lg:hidden"
         >
-          <Bell className="size-5" />
+          <LayoutGrid className="size-5" />
         </button>
 
-        <Link
-          to={"/profile" as any}
-          aria-label="Open profile"
-          className="grid size-9 place-items-center overflow-hidden rounded-full border border-border bg-card text-xs font-bold transition-all duration-200 hover:-translate-y-0.5 hover:border-foreground"
-        >
-          {profile?.avatar_url ? (
-            <img
-              src={profile.avatar_url}
-              alt={
-                profile.display_name ||
-                profile.username ||
-                "Profile"
-              }
-              className="size-full object-cover"
-            />
-          ) : (
-            <span>{initials}</span>
-          )}
-        </Link>
+        <div className="relative hidden w-full max-w-md lg:block">
+          <Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
+
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            aria-label="Search teams, players, leagues or matches"
+            placeholder="Search teams, players, leagues..."
+            className="h-10 w-full rounded-lg border border-border bg-card pl-10 pr-4 text-sm outline-none placeholder:text-muted-foreground focus:border-foreground"
+          />
+        </div>
+
+        <div className="ml-auto flex items-center gap-2 sm:gap-4">
+          <button
+            aria-label="Notifications"
+            className="rounded-md p-2 text-muted-foreground transition-all duration-200 hover:bg-white/10 hover:text-foreground"
+          >
+            <Bell className="size-5" />
+          </button>
+
+          <Link
+            to={"/profile" as any}
+            aria-label="Open profile"
+            className="grid size-9 place-items-center overflow-hidden rounded-full border border-border bg-card text-xs font-bold transition-all duration-200 hover:-translate-y-0.5 hover:border-foreground"
+          >
+            {profile?.avatar_url ? (
+              <img
+                src={profile.avatar_url}
+                alt={
+                  profile.display_name ||
+                  profile.username ||
+                  "Profile"
+                }
+                className="size-full object-cover"
+              />
+            ) : (
+              <span>{initials}</span>
+            )}
+          </Link>
+        </div>
+      </div>
+
+      <div className="pb-3 lg:hidden">
+        <div className="relative w-full">
+          <Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
+
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            aria-label="Search teams, players, leagues or matches"
+            placeholder="Search teams, players, leagues..."
+            className="h-10 w-full rounded-lg border border-border bg-card pl-10 pr-4 text-sm outline-none placeholder:text-muted-foreground focus:border-foreground"
+          />
+        </div>
       </div>
     </header>
   );
