@@ -1,24 +1,44 @@
+import {
+  REST,
+  Routes,
+  SlashCommandBuilder,
+} from "discord.js";
+
+const token = process.env.DISCORD_BOT_TOKEN;
+const clientId = process.env.DISCORD_CLIENT_ID;
+const guildId = process.env.DISCORD_GUILD_ID;
+
+if (!token || !clientId || !guildId) {
+  throw new Error(
+    "DISCORD_BOT_TOKEN, DISCORD_CLIENT_ID and DISCORD_GUILD_ID are required.",
+  );
+}
+
 const commands = [
   new SlashCommandBuilder()
     .setName("setup")
     .setDescription("Create and connect a NOVA league")
-    .addStringOption((o) =>
-      o.setName("league")
+    .addStringOption((option) =>
+      option
+        .setName("league")
         .setDescription("League name")
         .setRequired(true),
     )
-    .addStringOption((o) =>
-      o.setName("division1")
+    .addStringOption((option) =>
+      option
+        .setName("division1")
         .setDescription("Division 1")
         .setRequired(true),
     )
-    .addStringOption((o) =>
-      o.setName("division2")
+    .addStringOption((option) =>
+      option
+        .setName("division2")
         .setDescription("Optional Division 2")
         .setRequired(false),
     )
-    .addStringOption((o) =>
-      o.setName("division3")
+    .addStringOption((option) =>
+      option
+        .setName("division3")
         .setDescription("Optional Division 3")
         .setRequired(false),
     ),
@@ -55,3 +75,17 @@ const commands = [
     .setName("transferleague")
     .setDescription("Transfer league ownership"),
 ].map((command) => command.toJSON());
+
+const rest = new REST({ version: "10" }).setToken(token);
+
+try {
+  await rest.put(
+    Routes.applicationGuildCommands(clientId, guildId),
+    { body: commands },
+  );
+
+  console.log("✅ NOVA slash commands registered successfully.");
+} catch (error) {
+  console.error("❌ Failed to register NOVA slash commands:", error);
+  process.exit(1);
+}
