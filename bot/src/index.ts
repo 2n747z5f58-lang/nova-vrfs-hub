@@ -6,7 +6,7 @@ import {
 } from "discord.js";
 import { handleCommand } from "./commands.js";
 
-const token = process.env.DISCORD_TOKEN;
+const token = process.env.DISCORD_BOT_TOKEN;
 
 if (!token) {
   throw new Error("DISCORD_TOKEN is missing.");
