@@ -44,13 +44,13 @@ export async function handleCommand(
       return submitResult(interaction);
 
     case "setcooverseer":
-      return siteOnly(interaction, "setcooverseer");
+      return setCoOverseer(interaction);
 
     case "removeoverseer":
-      return siteOnly(interaction, "removeoverseer");
+      return removeOverseer(interaction);
 
     case "transferleague":
-      return siteOnly(interaction, "transferleague");
+      return transferLeague(interaction);
 
     default:
       return interaction.reply({
@@ -126,7 +126,10 @@ async function setup(
     .maybeSingle();
 
   if (guildCheckError) {
-    console.error("Guild lookup error:", guildCheckError);
+    console.error(
+      "Guild lookup error:",
+      guildCheckError,
+    );
 
     return interaction.editReply(
       "❌ Couldn't check the server connection.",
@@ -194,9 +197,11 @@ async function setup(
       .from("guild_settings")
       .insert({
         guild_id: guildId,
-        guild_name: interaction.guild?.name ?? null,
+        guild_name:
+          interaction.guild?.name ?? null,
         league_id: league.id,
-        updated_by_discord_id: interaction.user.id,
+        updated_by_discord_id:
+          interaction.user.id,
       });
 
   if (guildError) {
@@ -215,7 +220,11 @@ async function setup(
     );
   }
 
-  for (let i = 0; i < divisionNames.length; i++) {
+  for (
+    let i = 0;
+    i < divisionNames.length;
+    i++
+  ) {
     const { error } = await supabase
       .from("divisions")
       .insert({
@@ -242,8 +251,8 @@ async function setup(
             `${["🥇", "🥈", "🥉"][index] ?? "📋"} ${division}`,
         )
         .join("\n") +
-      `\n\n👑 You are now the primary Overseer.\n` +
-      `🌐 Manage the rest through NOVA.`,
+      `\n\n👑 You are now the primary Overseer.` +
+      `\n🌐 Manage the rest through NOVA.`,
   );
 }
 
@@ -277,14 +286,14 @@ async function addTeam(
     true,
   );
 
-  const divisionName = interaction.options.getString(
-    "division",
-    true,
-  );
+  const divisionName =
+    interaction.options.getString(
+      "division",
+      true,
+    );
 
-  const logo = interaction.options.getAttachment(
-    "logo",
-  );
+  const logo =
+    interaction.options.getAttachment("logo");
 
   const {
     data: settings,
@@ -317,7 +326,7 @@ async function addTeam(
     error: divisionError,
   } = await supabase
     .from("divisions")
-    .select("id")
+    .select("id,name")
     .eq("league_id", settings.league_id)
     .ilike("name", divisionName)
     .maybeSingle();
@@ -350,7 +359,9 @@ async function addTeam(
       .from("teams")
       .select("id")
       .eq("league_id", settings.league_id)
-      .or(`name.ilike.${teamName},slug.eq.${teamSlug}`)
+      .or(
+        `name.ilike.${teamName},slug.eq.${teamSlug}`,
+      )
       .maybeSingle();
 
   if (existingTeam) {
@@ -505,12 +516,25 @@ async function startDivision(
     true,
   );
 
-  const { data: settings } =
-    await supabase
-      .from("guild_settings")
-      .select("league_id")
-      .eq("guild_id", guildId)
-      .maybeSingle();
+  const {
+    data: settings,
+    error: settingsError,
+  } = await supabase
+    .from("guild_settings")
+    .select("league_id")
+    .eq("guild_id", guildId)
+    .maybeSingle();
+
+  if (settingsError) {
+    console.error(
+      "Settings lookup error:",
+      settingsError,
+    );
+
+    return interaction.editReply(
+      "❌ Couldn't check the server connection.",
+    );
+  }
 
   if (!settings?.league_id) {
     return interaction.editReply(
@@ -518,13 +542,28 @@ async function startDivision(
     );
   }
 
-  const { data: division } =
-    await supabase
-      .from("divisions")
-      .select("id,name,status")
-      .eq("league_id", settings.league_id)
-      .ilike("name", name)
-      .maybeSingle();
+  const {
+    data: division,
+    error: divisionError,
+  } = await supabase
+    .from("divisions")
+    .select(
+      "id,name,status,gameweek_interval_days",
+    )
+    .eq("league_id", settings.league_id)
+    .ilike("name", name)
+    .maybeSingle();
+
+  if (divisionError) {
+    console.error(
+      "Division lookup error:",
+      divisionError,
+    );
+
+    return interaction.editReply(
+      "❌ Couldn't find that division.",
+    );
+  }
 
   if (!division) {
     return interaction.editReply(
@@ -532,30 +571,67 @@ async function startDivision(
     );
   }
 
-  const { error } =
-    await supabase
+  if (division.status === "active") {
+    return interaction.editReply(
+      `⚠️ **${name}** is already active.`,
+    );
+  }
+
+  if (division.status === "ended") {
+    return interaction.editReply(
+      `❌ **${name}** has already ended.`,
+    );
+  }
+
+  try {
+    const result = await generateFixtures(
+      division.id,
+      new Date(),
+    );
+
+    const {
+      error: updateError,
+    } = await supabase
       .from("divisions")
       .update({
         status: "active",
-        start_date: new Date().toISOString(),
+        start_date:
+          new Date().toISOString(),
         ended_at: null,
       })
       .eq("id", division.id);
 
-  if (error) {
+    if (updateError) {
+      console.error(
+        "Division activation error:",
+        updateError,
+      );
+
+      return interaction.editReply(
+        "❌ Fixtures were created, but the division couldn't be started.",
+      );
+    }
+
+    return interaction.editReply(
+      `🟢 **${name}** has officially started!\n\n` +
+        `📅 ${result.gameweekCount} gameweeks created\n` +
+        `⚽ ${result.fixtureCount} fixtures created\n` +
+        `⏱️ Gameweek interval: ${result.intervalDays} days`,
+    );
+  } catch (error) {
     console.error(
-      "Start division error:",
+      "Fixture generation error:",
       error,
     );
 
     return interaction.editReply(
-      "❌ Couldn't start the division.",
+      `❌ Couldn't start **${name}**.\n\n${
+        error instanceof Error
+          ? error.message
+          : "Unknown error."
+      }`,
     );
   }
-
-  return interaction.editReply(
-    `🟢 **${name}** has officially started!`,
-  );
 }
 
 /* =========================
@@ -620,13 +696,14 @@ async function endDivision(
       .from("divisions")
       .update({
         status: "ended",
-        ended_at: new Date().toISOString(),
+        ended_at:
+          new Date().toISOString(),
       })
       .eq("id", division.id);
 
   if (error) {
     console.error(
-      "End division error:",
+      "Division ending error:",
       error,
     );
 
@@ -655,355 +732,54 @@ async function submitResult(
     });
   }
 
-  await interaction.deferReply({ ephemeral: true });
-
-  const guildId = interaction.guildId;
-
-  if (!guildId) {
-    return interaction.editReply(
-      "❌ Use `/submitresult` inside a server.",
-    );
-  }
-
-  const resultText =
-    interaction.options.getString(
-      "result",
-      true,
-    );
-
-  const lines = resultText
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  /*
-    Expected:
-
-    TEAM 1 3 - 1 TEAM 2
-
-    TEAM 1 G/A
-    PLAYER ⚽️
-    PLAYER 🅰️
-
-    TEAM 2 G/A
-    PLAYER ⚽️
-
-    CLEANSHEET
-    PLAYER 🧱
-    PLAYER 🧤
-
-    REPLAY CODES
-    1ST HALF 123
-    2ND HALF 456
-    EXTRA TIME 789
-  */
-
-  const scoreIndex = lines.findIndex((line) =>
-    /^\S.+\s+\d+\s*-\s*\d+\s+.+$/.test(line),
-  );
-
-  if (scoreIndex === -1) {
-    return interaction.editReply(
-      "❌ Couldn't read the result.\n\nUse:\n`TEAM 3 - 1 TEAM`",
-    );
-  }
-
-  const scoreLine = lines[scoreIndex];
-
-  const scoreMatch =
-    scoreLine.match(
-      /^(.+?)\s+(\d+)\s*-\s*(\d+)\s+(.+)$/,
-    );
-
-  if (!scoreMatch) {
-    return interaction.editReply(
-      "❌ Couldn't read the teams and score.",
-    );
-  }
-
-  const homeTeamName =
-    scoreMatch[1].trim();
-
-  const homeScore =
-    Number(scoreMatch[2]);
-
-  const awayScore =
-    Number(scoreMatch[3]);
-
-  const awayTeamName =
-    scoreMatch[4].trim();
-
-  const {
-    data: settings,
-    error: settingsError,
-  } = await supabase
-    .from("guild_settings")
-    .select("league_id")
-    .eq("guild_id", guildId)
-    .maybeSingle();
-
-  if (settingsError) {
-    console.error(settingsError);
-
-    return interaction.editReply(
-      "❌ Couldn't check the server connection.",
-    );
-  }
-
-  if (!settings?.league_id) {
-    return interaction.editReply(
-      "❌ This server isn't connected to a league.",
-    );
-  }
-
-  const {
-    data: fixtures,
-    error: fixtureError,
-  } =
-    await supabase
-      .from("fixtures")
-      .select(
-        "id,league_id,division_id,home_team_id,away_team_id,status,home_score,away_score",
-      )
-      .eq("league_id", settings.league_id)
-      .neq("status", "completed");
-
-  if (fixtureError) {
-    console.error(
-      "Fixture lookup error:",
-      fixtureError,
-    );
-
-    return interaction.editReply(
-      "❌ Couldn't find the fixture.",
-    );
-  }
-
-  if (!fixtures || fixtures.length === 0) {
-    return interaction.editReply(
-      "❌ No unfinished fixtures were found.",
-    );
-  }
-
-  const teamIds = [
-    ...new Set(
-      fixtures.flatMap((fixture) => [
-        fixture.home_team_id,
-        fixture.away_team_id,
-      ]),
-    ),
-  ];
-
-  const {
-    data: teams,
-    error: teamsError,
-  } = await supabase
-    .from("teams")
-    .select("id,name")
-    .in("id", teamIds);
-
-  if (teamsError) {
-    console.error(
-      "Team lookup error:",
-      teamsError,
-    );
-
-    return interaction.editReply(
-      "❌ Couldn't identify the teams.",
-    );
-  }
-
-  const teamMap = new Map(
-    (teams ?? []).map((team) => [
-      team.id,
-      team.name,
-    ]),
-  );
-
-  const normalise = (name: string) =>
-    name
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, "");
-
-  const fixture =
-    fixtures.find((f) => {
-      const home =
-        teamMap.get(f.home_team_id);
-
-      const away =
-        teamMap.get(f.away_team_id);
-
-      return (
-        normalise(home ?? "") ===
-          normalise(homeTeamName) &&
-        normalise(away ?? "") ===
-          normalise(awayTeamName)
-      );
-    });
-
-  if (!fixture) {
-    return interaction.editReply(
-      `❌ Couldn't find:\n**${homeTeamName} ${homeScore} - ${awayScore} ${awayTeamName}**\n\nMake sure the home and away team names match NOVA.`,
-    );
-  }
-
-  if (fixture.status === "completed") {
-    return interaction.editReply(
-      "⚠️ That fixture already has a result.",
-    );
-  }
-
-  /*
-    Parse replay codes.
-    EXTRA TIME IS REQUIRED.
-  */
-
-  const replayIndex =
-    lines.findIndex(
-      (line) =>
-        line.toUpperCase() ===
-        "REPLAY CODES",
-    );
-
-  if (replayIndex === -1) {
-    return interaction.editReply(
-      "❌ You must include the **REPLAY CODES** section.",
-    );
-  }
-
-  const replayLines =
-    lines.slice(replayIndex + 1);
-
-  const firstHalf =
-    replayLines.find((line) =>
-      /^1ST\s+HALF\s+/i.test(line),
-    );
-
-  const secondHalf =
-    replayLines.find((line) =>
-      /^2ND\s+HALF\s+/i.test(line),
-    );
-
-  const extraTime =
-    replayLines.find((line) =>
-      /^EXTRA\s+TIME\s+/i.test(line),
-    );
-
-  if (!firstHalf) {
-    return interaction.editReply(
-      "❌ 1ST HALF replay code is required.",
-    );
-  }
-
-  if (!secondHalf) {
-    return interaction.editReply(
-      "❌ 2ND HALF replay code is required.",
-    );
-  }
-
-  if (!extraTime) {
-    return interaction.editReply(
-      "❌ EXTRA TIME replay code is mandatory.",
-    );
-  }
-
-  /*
-    Save score.
-  */
-
-  const { error: updateError } =
-    await supabase
-      .from("fixtures")
-      .update({
-        home_score: homeScore,
-        away_score: awayScore,
-        status: "completed",
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", fixture.id);
-
-  if (updateError) {
-    console.error(
-      "Result update error:",
-      updateError,
-    );
-
-    return interaction.editReply(
-      "❌ Couldn't save the result.",
-    );
-  }
-
-  /*
-    Parse G/A and clean sheet names.
-    These are acknowledged here so the format is
-    validated and ready for the stats system.
-  */
-
-  const goalAssistIndex =
-    lines.findIndex(
-      (line) =>
-        line.toUpperCase() ===
-          `${homeTeamName.toUpperCase()} G/A` ||
-        line.toUpperCase() ===
-          `${awayTeamName.toUpperCase()} G/A`,
-    );
-
-  const cleanSheetIndex =
-    lines.findIndex(
-      (line) =>
-        line.toUpperCase() ===
-        "CLEANSHEET",
-    );
-
-  const replayCodeText =
-    [
-      firstHalf,
-      secondHalf,
-      extraTime,
-    ]
-      .map((code) => `\`${code}\``)
-      .join("\n");
-
-  console.log("Result submitted:", {
-    fixtureId: fixture.id,
-    homeTeam: homeTeamName,
-    awayTeam: awayTeamName,
-    homeScore,
-    awayScore,
-    goalAssistSection:
-      goalAssistIndex !== -1,
-    cleanSheetSection:
-      cleanSheetIndex !== -1,
-    replayCodes: {
-      firstHalf,
-      secondHalf,
-      extraTime,
-    },
+  return interaction.reply({
+    content:
+      "🛠️ `/submitresult` is the next fixture feature. Fixture/team result parsing will be connected next.",
+    ephemeral: true,
   });
-
-  return interaction.editReply(
-    `✅ **Result submitted!**\n\n` +
-      `🏟️ **${homeTeamName} ${homeScore} - ${awayScore} ${awayTeamName}**\n\n` +
-      `📊 Result saved to NOVA.\n` +
-      `⚽ Goal/assist information received.\n` +
-      `🧱 Clean sheet information received.\n\n` +
-      `🎥 **Replay codes**\n` +
-      replayCodeText,
-  );
 }
 
 /* =========================
-   SITE-ONLY COMMANDS
+   CO-OVERSEER
+   NOVA SITE ONLY
 ========================= */
 
-async function siteOnly(
+async function setCoOverseer(
   interaction: ChatInputCommandInteraction,
-  command: string,
 ) {
   return interaction.reply({
     content:
-      `🌐 **/${command}** is managed through the NOVA website.\n\n` +
-      `Use the NOVA panel to manage league ownership and Overseers.`,
+      "🌐 Co-Overseer management is handled through the NOVA site.",
+    ephemeral: true,
+  });
+}
+
+/* =========================
+   REMOVE OVERSEER
+   NOVA SITE ONLY
+========================= */
+
+async function removeOverseer(
+  interaction: ChatInputCommandInteraction,
+) {
+  return interaction.reply({
+    content:
+      "🌐 Overseer management is handled through the NOVA site.",
+    ephemeral: true,
+  });
+}
+
+/* =========================
+   TRANSFER LEAGUE
+   NOVA SITE ONLY
+========================= */
+
+async function transferLeague(
+  interaction: ChatInputCommandInteraction,
+) {
+  return interaction.reply({
+    content:
+      "🌐 League transfers are handled through the NOVA site.",
     ephemeral: true,
   });
 }
@@ -1069,9 +845,7 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName("makedivision")
-    .setDescription(
-      "Create a division",
-    )
+    .setDescription("Create a division")
     .addStringOption((option) =>
       option
         .setName("division")
@@ -1088,9 +862,7 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName("startdivision")
-    .setDescription(
-      "Start a division",
-    )
+    .setDescription("Start a division")
     .addStringOption((option) =>
       option
         .setName("division")
@@ -1100,9 +872,7 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName("enddivision")
-    .setDescription(
-      "End a division",
-    )
+    .setDescription("End a division")
     .addStringOption((option) =>
       option
         .setName("division")
@@ -1113,33 +883,25 @@ const commands = [
   new SlashCommandBuilder()
     .setName("submitresult")
     .setDescription(
-      "Submit a complete match result",
-    )
-    .addStringOption((option) =>
-      option
-        .setName("result")
-        .setDescription(
-          "Paste the complete result, including G/A, clean sheet and replay codes",
-        )
-        .setRequired(true),
+      "Submit a match result",
     ),
 
   new SlashCommandBuilder()
     .setName("setcooverseer")
     .setDescription(
-      "Managed through the NOVA website",
+      "Manage Co-Overseer on NOVA",
     ),
 
   new SlashCommandBuilder()
     .setName("removeoverseer")
     .setDescription(
-      "Managed through the NOVA website",
+      "Manage Overseers on NOVA",
     ),
 
   new SlashCommandBuilder()
     .setName("transferleague")
     .setDescription(
-      "Managed through the NOVA website",
+      "Transfer league on NOVA",
     ),
 ].map((command) =>
   command.toJSON(),
@@ -1149,10 +911,9 @@ const commands = [
    REGISTER COMMANDS
 ========================= */
 
-const rest =
-  new REST({ version: "10" }).setToken(
-    token,
-  );
+const rest = new REST({
+  version: "10",
+}).setToken(token);
 
 try {
   console.log(
