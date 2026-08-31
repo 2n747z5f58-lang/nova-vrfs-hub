@@ -806,40 +806,104 @@ async function submitResult(
     );
   }
   /*
-   * MUST BE A REPLY
+   * Discord does not expose the replied-to message
+   * as interaction.message for slash commands.
+   *
+   * Instead, look through recent channel messages
+   * and find the newest completed result message.
    */
-  const reference =
-    interaction.message?.reference;
-  if (!reference?.messageId) {
+  const channel = interaction.channel;
+  if (!channel || !("messages" in channel)) {
     return interaction.editReply(
-      "❌ Reply to the completed result message with `/submitresult`.",
+      "❌ I couldn't access this channel.",
     );
   }
-  let resultMessage: Message;
+  let recentMessages;
   try {
-    resultMessage =
-      (await interaction.channel?.messages.fetch(
-        reference.messageId,
-      )) as Message;
+    recentMessages =
+      await channel.messages.fetch({
+        limit: 50,
+      });
   } catch (error) {
-    console.error(error);
+    console.error(
+      "Recent message fetch error:",
+      error,
+    );
     return interaction.editReply(
-      "❌ Couldn't read the result message.",
+      "❌ I couldn't read the recent messages.",
+    );
+  }
+  const candidateMessages =
+    [...recentMessages.values()]
+      .filter(
+        (message): message is Message =>
+          !message.author.bot &&
+          message.guildId === guildId &&
+          message.content.trim().length > 0,
+      )
+      .sort(
+        (a, b) =>
+          b.createdTimestamp -
+          a.createdTimestamp,
+      );
+  /*
+   * Find the newest message that looks like
+   * a NOVA completed result.
+   *
+   * Required:
+   * @HOME 2 - 0 @AWAY
+   * replay codes
+   */
+  let resultMessage: Message | null = null;
+  for (const message of candidateMessages) {
+    const content =
+      message.content.trim();
+    const scoreMatch = content.match(
+      /<@&(\d+)>\s+(\d+)\s*-\s*(\d+)\s+<@&(\d+)>/i,
+    );
+    if (!scoreMatch) {
+      continue;
+    }
+    const hasReplaySection =
+      /^replay codes$/im.test(content);
+    if (!hasReplaySection) {
+      continue;
+    }
+    const hasFirstHalf =
+      /^1ST HALF\s+\S+/im.test(content);
+    const hasSecondHalf =
+      /^2ND HALF\s+\S+/im.test(content);
+    const hasExtraTime =
+      /^EXTRA TIME\s+\S+/im.test(content);
+    if (
+      !hasFirstHalf ||
+      !hasSecondHalf ||
+      !hasExtraTime
+    ) {
+      continue;
+    }
+    resultMessage = message;
+    break;
+  }
+  if (!resultMessage) {
+    return interaction.editReply(
+      "❌ I couldn't find a completed result message nearby.\n\n" +
+        "Make sure the result message contains:\n" +
+        "`@HOME 2 - 0 @AWAY`\n" +
+        "`Replay Codes`\n" +
+        "`1ST HALF <code>`\n" +
+        "`2ND HALF <code>`\n" +
+        "`EXTRA TIME <code>`",
     );
   }
   const content =
     resultMessage.content.trim();
-  if (!content) {
-    return interaction.editReply(
-      "❌ The result message is empty.",
-    );
-  }
   const lines = content
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
   /*
-   * FIND TEAMS
+   * FIND TEAMS FROM ROLE MENTIONS
    */
   const roleMentions =
     [...resultMessage.mentions.roles.values()];
@@ -851,14 +915,14 @@ async function submitResult(
   /*
    * SCORE
    *
-   * @HOME 2 - 0 @AWAY
+   * @HOME 0 - 0 @AWAY
    */
   const scoreMatch = content.match(
     /<@&(\d+)>\s+(\d+)\s*-\s*(\d+)\s+<@&(\d+)>/i,
   );
   if (!scoreMatch) {
     return interaction.editReply(
-      "❌ I couldn't read the score.\n\nUse:\n`@HOME 2 - 0 @AWAY`",
+      "❌ I couldn't read the score.\n\nUse:\n`@HOME 0 - 0 @AWAY`",
     );
   }
   const homeRoleId =
@@ -897,7 +961,7 @@ async function submitResult(
     );
   }
   /*
-   * FIND TEAMS
+   * FIND TEAMS BY DISCORD ROLE
    */
   const {
     data: homeTeam,
@@ -985,25 +1049,18 @@ async function submitResult(
     );
   }
   /*
-   * PARSE MATCH EVENTS
+   * PARSE PLAYER EVENTS
    *
-   * Supported format:
+   * Supported:
+   * ⚽️ Player
+   * 🅰️ Player
+   * 🧱 Player
+   * 🧤 Player
+   * 🌟 Player
    *
+   * Team sections:
    * @HOME
-   * ⚽️ @Player
-   * ⚽️ @Player
-   * 🅰️ @Player
-   *
    * @AWAY
-   * ⚽️ @Player
-   *
-   * Cleansheet
-   * PLAYER 🧱
-   * PLAYER 🧱
-   * PLAYER 🧱
-   * PLAYER 🧤
-   *
-   * PLAYER 🌟
    */
   const events: Array<{
     fixture_id: string;
@@ -1015,13 +1072,10 @@ async function submitResult(
     | string
     | null = null;
   let section:
-    | "events"
+    | "ga"
     | "cleansheet"
     | "replays"
     | null = null;
-  /*
-   * PARSE SECTIONS
-   */
   for (
     let i = 1;
     i < lines.length;
@@ -1029,30 +1083,29 @@ async function submitResult(
   ) {
     const line =
       lines[i];
-    /*
-     * REPLAY CODES
-     */
+    const lower =
+      line.toLowerCase();
     if (
-      line.toLowerCase() ===
-      "replay codes"
-    ) {
-      section = "replays";
-      currentTeamId = null;
-      continue;
-    }
-    /*
-     * CLEANSHEET
-     */
-    if (
-      line.toLowerCase() ===
-      "cleansheet"
+      lower === "cleansheet"
     ) {
       section = "cleansheet";
       currentTeamId = null;
       continue;
     }
+    if (
+      lower === "replay codes"
+    ) {
+      section = "replays";
+      currentTeamId = null;
+      continue;
+    }
+    if (
+      section === "replays"
+    ) {
+      continue;
+    }
     /*
-     * TEAM HEADER
+     * Team role heading
      */
     const roleMatch =
       line.match(/^<@&(\d+)>$/);
@@ -1064,7 +1117,7 @@ async function submitResult(
       ) {
         currentTeamId =
           homeTeam.id;
-        section = "events";
+        section = "ga";
         continue;
       }
       if (
@@ -1072,134 +1125,29 @@ async function submitResult(
       ) {
         currentTeamId =
           awayTeam.id;
-        section = "events";
+        section = "ga";
         continue;
       }
     }
     /*
-     * REPLAY SECTION
-     */
-    if (section === "replays") {
-      continue;
-    }
-    /*
-     * CLEAN SHEET SECTION
-     *
-     * This section does not need a team header.
-     *
-     * Players here are resolved by their registered
-     * team, because the result format intentionally
-     * keeps this section simple.
-     */
-    if (section === "cleansheet") {
-      const isDefCS =
-        line.includes("🧱");
-      const isGKCS =
-        line.includes("🧤");
-      if (
-        !isDefCS &&
-        !isGKCS
-      ) {
-        continue;
-      }
-      const playerName =
-        line
-          .replace("🧱", "")
-          .replace("🧤", "")
-          .trim();
-      if (!playerName) {
-        continue;
-      }
-      const discordMention =
-        playerName.match(
-          /^<@!?(\d+)>$/,
-        );
-      let player:
-        | {
-            id: string;
-            username: string | null;
-            display_name: string | null;
-            team_id: string | null;
-            discord_id: string | null;
-          }
-        | null = null;
-      if (discordMention) {
-        const {
-          data,
-          error,
-        } = await supabase
-          .from("players")
-          .select(
-            "id,username,display_name,team_id,discord_id",
-          )
-          .eq(
-            "discord_id",
-            discordMention[1],
-          )
-          .maybeSingle();
-        if (error) {
-          console.error(error);
-          return interaction.editReply(
-            "❌ Couldn't look up that player.",
-          );
-        }
-        player = data;
-      } else {
-        const {
-          data,
-          error,
-        } = await supabase
-          .from("players")
-          .select(
-            "id,username,display_name,team_id,discord_id",
-          )
-          .or(
-            `username.ilike.${playerName},display_name.ilike.${playerName}`,
-          )
-          .maybeSingle();
-        if (error) {
-          console.error(error);
-          return interaction.editReply(
-            "❌ Couldn't look up that player.",
-          );
-        }
-        player = data;
-      }
-      if (!player) {
-        return interaction.editReply(
-          `❌ Couldn't find player **${playerName}**.`,
-        );
-      }
-      if (!player.team_id) {
-        return interaction.editReply(
-          `❌ **${playerName}** isn't registered to a team.`,
-        );
-      }
-      const eventType =
-        isGKCS
-          ? "clean_sheet_keeper"
-          : "clean_sheet";
-      events.push({
-        fixture_id: fixture.id,
-        player_id: player.id,
-        team_id: player.team_id,
-        event_type: eventType,
-      });
-      continue;
-    }
-    /*
-     * MATCH EVENTS
+     * PLAYER EVENTS
      */
     const isGoal =
       line.includes("⚽️") ||
       line.includes("⚽");
     const isAssist =
       line.includes("🅰️");
+    const isDefCS =
+      line.includes("🧱");
+    const isGKCS =
+      line.includes("🧤");
     const isMOTM =
       line.includes("🌟");
     if (
       !isGoal &&
       !isAssist &&
+      !isDefCS &&
+      !isGKCS &&
       !isMOTM
     ) {
       continue;
@@ -1209,14 +1157,13 @@ async function submitResult(
         `❌ Couldn't determine which team **${line}** belongs to.`,
       );
     }
-    /*
-     * REMOVE EMOJIS
-     */
     const playerName =
       line
         .replace("⚽️", "")
         .replace("⚽", "")
         .replace("🅰️", "")
+        .replace("🧱", "")
+        .replace("🧤", "")
         .replace("🌟", "")
         .trim();
     if (!playerName) {
@@ -1300,11 +1247,18 @@ async function submitResult(
     let eventType:
       | "goal"
       | "assist"
+      | "clean_sheet"
+      | "clean_sheet_keeper"
       | "motm";
     if (isGoal) {
       eventType = "goal";
     } else if (isAssist) {
       eventType = "assist";
+    } else if (isDefCS) {
+      eventType = "clean_sheet";
+    } else if (isGKCS) {
+      eventType =
+        "clean_sheet_keeper";
     } else {
       eventType = "motm";
     }
@@ -1431,7 +1385,7 @@ async function submitResult(
     );
   }
   /*
-   * SAVE RESULT
+   * SAVE RESULT ROW
    */
   const {
     error: resultError,
@@ -1671,7 +1625,7 @@ const commands = [
   new SlashCommandBuilder()
     .setName("submitresult")
     .setDescription(
-      "Submit the result of the message you replied to",
+      "Submit the latest completed result message",
     ),
   new SlashCommandBuilder()
     .setName("setcooverseer")
