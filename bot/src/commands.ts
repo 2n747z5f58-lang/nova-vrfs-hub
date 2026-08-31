@@ -818,9 +818,9 @@ async function submitResult(
   let resultMessage: Message;
   try {
     resultMessage =
-      await interaction.channel?.messages.fetch(
+      (await interaction.channel?.messages.fetch(
         reference.messageId,
-      ) as Message;
+      )) as Message;
   } catch (error) {
     console.error(error);
     return interaction.editReply(
@@ -839,7 +839,7 @@ async function submitResult(
     .map((line) => line.trim())
     .filter(Boolean);
   /*
-   * FIND TEAMS FROM ROLE MENTIONS
+   * FIND TEAMS
    */
   const roleMentions =
     [...resultMessage.mentions.roles.values()];
@@ -858,7 +858,7 @@ async function submitResult(
   );
   if (!scoreMatch) {
     return interaction.editReply(
-      "❌ I couldn't read the score.\n\nUse:\n`@HOME 0 - 0 @AWAY`",
+      "❌ I couldn't read the score.\n\nUse:\n`@HOME 2 - 0 @AWAY`",
     );
   }
   const homeRoleId =
@@ -897,7 +897,7 @@ async function submitResult(
     );
   }
   /*
-   * FIND TEAMS BY DISCORD ROLE
+   * FIND TEAMS
    */
   const {
     data: homeTeam,
@@ -963,18 +963,9 @@ async function submitResult(
       "id,home_team_id,away_team_id,status,gameweek,kickoff_at",
     )
     .eq("league_id", settings.league_id)
-    .eq(
-      "division_id",
-      homeTeam.division_id,
-    )
-    .eq(
-      "home_team_id",
-      homeTeam.id,
-    )
-    .eq(
-      "away_team_id",
-      awayTeam.id,
-    )
+    .eq("division_id", homeTeam.division_id)
+    .eq("home_team_id", homeTeam.id)
+    .eq("away_team_id", awayTeam.id)
     .eq("status", "scheduled")
     .order("kickoff_at", {
       ascending: true,
@@ -996,14 +987,23 @@ async function submitResult(
   /*
    * PARSE MATCH EVENTS
    *
-   * Supported:
-   * ⚽️ Goals
-   * 🅰️ Assists
-   * 🧱 Defensive clean sheets
-   * 🧤 Goalkeeper clean sheets
-   * 🌟 MOTM
+   * Supported format:
    *
-   * Blank lines and ? are ignored.
+   * @HOME
+   * ⚽️ @Player
+   * ⚽️ @Player
+   * 🅰️ @Player
+   *
+   * @AWAY
+   * ⚽️ @Player
+   *
+   * Cleansheet
+   * PLAYER 🧱
+   * PLAYER 🧱
+   * PLAYER 🧱
+   * PLAYER 🧤
+   *
+   * PLAYER 🌟
    */
   const events: Array<{
     fixture_id: string;
@@ -1015,14 +1015,12 @@ async function submitResult(
     | string
     | null = null;
   let section:
-    | "ga"
+    | "events"
     | "cleansheet"
+    | "replays"
     | null = null;
   /*
-   * MATCH ROLE HEADING
-   *
-   * A line containing a team role mention
-   * changes the current team.
+   * PARSE SECTIONS
    */
   for (
     let i = 1;
@@ -1031,6 +1029,20 @@ async function submitResult(
   ) {
     const line =
       lines[i];
+    /*
+     * REPLAY CODES
+     */
+    if (
+      line.toLowerCase() ===
+      "replay codes"
+    ) {
+      section = "replays";
+      currentTeamId = null;
+      continue;
+    }
+    /*
+     * CLEANSHEET
+     */
     if (
       line.toLowerCase() ===
       "cleansheet"
@@ -1040,7 +1052,7 @@ async function submitResult(
       continue;
     }
     /*
-     * Team heading
+     * TEAM HEADER
      */
     const roleMatch =
       line.match(/^<@&(\d+)>$/);
@@ -1052,7 +1064,7 @@ async function submitResult(
       ) {
         currentTeamId =
           homeTeam.id;
-        section = "ga";
+        section = "events";
         continue;
       }
       if (
@@ -1060,49 +1072,138 @@ async function submitResult(
       ) {
         currentTeamId =
           awayTeam.id;
-        section = "ga";
+        section = "events";
         continue;
       }
     }
     /*
-     * Ignore blank / unknown lines.
-     *
-     * This means:
-     * ?
-     * blank sections
-     * random formatting
-     *
-     * will not break the submission.
+     * REPLAY SECTION
      */
-    if (!line || line === "?") {
+    if (section === "replays") {
       continue;
     }
     /*
-     * EMOJI EVENTS
+     * CLEAN SHEET SECTION
+     *
+     * This section does not need a team header.
+     *
+     * Players here are resolved by their registered
+     * team, because the result format intentionally
+     * keeps this section simple.
+     */
+    if (section === "cleansheet") {
+      const isDefCS =
+        line.includes("🧱");
+      const isGKCS =
+        line.includes("🧤");
+      if (
+        !isDefCS &&
+        !isGKCS
+      ) {
+        continue;
+      }
+      const playerName =
+        line
+          .replace("🧱", "")
+          .replace("🧤", "")
+          .trim();
+      if (!playerName) {
+        continue;
+      }
+      const discordMention =
+        playerName.match(
+          /^<@!?(\d+)>$/,
+        );
+      let player:
+        | {
+            id: string;
+            username: string | null;
+            display_name: string | null;
+            team_id: string | null;
+            discord_id: string | null;
+          }
+        | null = null;
+      if (discordMention) {
+        const {
+          data,
+          error,
+        } = await supabase
+          .from("players")
+          .select(
+            "id,username,display_name,team_id,discord_id",
+          )
+          .eq(
+            "discord_id",
+            discordMention[1],
+          )
+          .maybeSingle();
+        if (error) {
+          console.error(error);
+          return interaction.editReply(
+            "❌ Couldn't look up that player.",
+          );
+        }
+        player = data;
+      } else {
+        const {
+          data,
+          error,
+        } = await supabase
+          .from("players")
+          .select(
+            "id,username,display_name,team_id,discord_id",
+          )
+          .or(
+            `username.ilike.${playerName},display_name.ilike.${playerName}`,
+          )
+          .maybeSingle();
+        if (error) {
+          console.error(error);
+          return interaction.editReply(
+            "❌ Couldn't look up that player.",
+          );
+        }
+        player = data;
+      }
+      if (!player) {
+        return interaction.editReply(
+          `❌ Couldn't find player **${playerName}**.`,
+        );
+      }
+      if (!player.team_id) {
+        return interaction.editReply(
+          `❌ **${playerName}** isn't registered to a team.`,
+        );
+      }
+      const eventType =
+        isGKCS
+          ? "clean_sheet_keeper"
+          : "clean_sheet";
+      events.push({
+        fixture_id: fixture.id,
+        player_id: player.id,
+        team_id: player.team_id,
+        event_type: eventType,
+      });
+      continue;
+    }
+    /*
+     * MATCH EVENTS
      */
     const isGoal =
       line.includes("⚽️") ||
       line.includes("⚽");
     const isAssist =
       line.includes("🅰️");
-    const isDefCS =
-      line.includes("🧱");
-    const isGKCS =
-      line.includes("🧤");
     const isMOTM =
       line.includes("🌟");
     if (
       !isGoal &&
       !isAssist &&
-      !isDefCS &&
-      !isGKCS &&
       !isMOTM
     ) {
       continue;
     }
-    /*
-     * Need a team before player event
-     */
     if (!currentTeamId) {
       return interaction.editReply(
         `❌ Couldn't determine which team **${line}** belongs to.`,
@@ -1116,8 +1217,6 @@ async function submitResult(
         .replace("⚽️", "")
         .replace("⚽", "")
         .replace("🅰️", "")
-        .replace("🧱", "")
-        .replace("🧤", "")
         .replace("🌟", "")
         .trim();
     if (!playerName) {
@@ -1125,8 +1224,6 @@ async function submitResult(
     }
     /*
      * FIND PLAYER
-     *
-     * First try Discord mention.
      */
     const discordMention =
       playerName.match(
@@ -1163,9 +1260,6 @@ async function submitResult(
       }
       player = data;
     } else {
-      /*
-       * Fallback to username/display name
-       */
       const {
         data,
         error,
@@ -1206,18 +1300,11 @@ async function submitResult(
     let eventType:
       | "goal"
       | "assist"
-      | "clean_sheet"
-      | "clean_sheet_keeper"
       | "motm";
     if (isGoal) {
       eventType = "goal";
     } else if (isAssist) {
       eventType = "assist";
-    } else if (isDefCS) {
-      eventType = "clean_sheet";
-    } else if (isGKCS) {
-      eventType =
-        "clean_sheet_keeper";
     } else {
       eventType = "motm";
     }
@@ -1261,11 +1348,6 @@ async function submitResult(
   }
   /*
    * REPLAY CODES
-   *
-   * Required:
-   * 1ST HALF
-   * 2ND HALF
-   * EXTRA TIME
    */
   let replay1stHalf:
     | string
@@ -1349,7 +1431,7 @@ async function submitResult(
     );
   }
   /*
-   * SAVE RESULT ROW
+   * SAVE RESULT
    */
   const {
     error: resultError,
@@ -1374,9 +1456,6 @@ async function submitResult(
       "Result insert error:",
       resultError,
     );
-    /*
-     * Roll fixture back if result row fails.
-     */
     await supabase
       .from("fixtures")
       .update({
