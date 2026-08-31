@@ -851,7 +851,7 @@ async function submitResult(
   /*
    * SCORE
    *
-   * @TEST1 0 - 0 @TEST
+   * @HOME 2 - 0 @AWAY
    */
   const scoreMatch = content.match(
     /<@&(\d+)>\s+(\d+)\s*-\s*(\d+)\s+<@&(\d+)>/i,
@@ -904,7 +904,9 @@ async function submitResult(
     error: homeError,
   } = await supabase
     .from("teams")
-    .select("id,name,division_id,discord_role_id")
+    .select(
+      "id,name,division_id,discord_role_id",
+    )
     .eq("league_id", settings.league_id)
     .eq("discord_role_id", homeRoleId)
     .maybeSingle();
@@ -913,7 +915,9 @@ async function submitResult(
     error: awayError,
   } = await supabase
     .from("teams")
-    .select("id,name,division_id,discord_role_id")
+    .select(
+      "id,name,division_id,discord_role_id",
+    )
     .eq("league_id", settings.league_id)
     .eq("discord_role_id", awayRoleId)
     .maybeSingle();
@@ -959,9 +963,18 @@ async function submitResult(
       "id,home_team_id,away_team_id,status,gameweek,kickoff_at",
     )
     .eq("league_id", settings.league_id)
-    .eq("division_id", homeTeam.division_id)
-    .eq("home_team_id", homeTeam.id)
-    .eq("away_team_id", awayTeam.id)
+    .eq(
+      "division_id",
+      homeTeam.division_id,
+    )
+    .eq(
+      "home_team_id",
+      homeTeam.id,
+    )
+    .eq(
+      "away_team_id",
+      awayTeam.id,
+    )
     .eq("status", "scheduled")
     .order("kickoff_at", {
       ascending: true,
@@ -981,7 +994,16 @@ async function submitResult(
     );
   }
   /*
-   * PARSE EMOJI EVENTS
+   * PARSE MATCH EVENTS
+   *
+   * Supported:
+   * ⚽️ Goals
+   * 🅰️ Assists
+   * 🧱 Defensive clean sheets
+   * 🧤 Goalkeeper clean sheets
+   * 🌟 MOTM
+   *
+   * Blank lines and ? are ignored.
    */
   const events: Array<{
     fixture_id: string;
@@ -995,8 +1017,6 @@ async function submitResult(
   let section:
     | "ga"
     | "cleansheet"
-    | "lines"
-    | "replays"
     | null = null;
   /*
    * MATCH ROLE HEADING
@@ -1019,28 +1039,9 @@ async function submitResult(
       currentTeamId = null;
       continue;
     }
-    if (
-      line.toLowerCase() ===
-      "lines hit"
-    ) {
-      section = "lines";
-      currentTeamId = null;
-      continue;
-    }
-    if (
-      line.toLowerCase() ===
-      "replay codes"
-    ) {
-      section = "replays";
-      currentTeamId = null;
-      continue;
-    }
-    if (
-      section === "replays" ||
-      section === "lines"
-    ) {
-      continue;
-    }
+    /*
+     * Team heading
+     */
     const roleMatch =
       line.match(/^<@&(\d+)>$/);
     if (roleMatch) {
@@ -1064,7 +1065,20 @@ async function submitResult(
       }
     }
     /*
-     * EMOJI EVENT
+     * Ignore blank / unknown lines.
+     *
+     * This means:
+     * ?
+     * blank sections
+     * random formatting
+     *
+     * will not break the submission.
+     */
+    if (!line || line === "?") {
+      continue;
+    }
+    /*
+     * EMOJI EVENTS
      */
     const isGoal =
       line.includes("⚽️") ||
@@ -1247,6 +1261,11 @@ async function submitResult(
   }
   /*
    * REPLAY CODES
+   *
+   * Required:
+   * 1ST HALF
+   * 2ND HALF
+   * EXTRA TIME
    */
   let replay1stHalf:
     | string
@@ -1306,8 +1325,6 @@ async function submitResult(
   }
   /*
    * SAVE FIXTURE
-   *
-   * Only use columns that exist on fixtures.
    */
   const {
     error: updateError,
@@ -1333,9 +1350,6 @@ async function submitResult(
   }
   /*
    * SAVE RESULT ROW
-   *
-   * replay_code is the column we confirmed
-   * exists in results.
    */
   const {
     error: resultError,
