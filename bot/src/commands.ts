@@ -6,7 +6,6 @@ import {
   PermissionFlagsBits,
 } from "discord.js";
 import { supabase } from "./database.js";
-import { generateFixtures } from "./fixtures.js";
 
 const token = process.env.DISCORD_BOT_TOKEN;
 const clientId = process.env.DISCORD_CLIENT_ID;
@@ -40,17 +39,20 @@ export async function handleCommand(
     case "enddivision":
       return endDivision(interaction);
 
+    case "generatefixtures":
+      return generateFixtures(interaction);
+
     case "submitresult":
-      return submitResult(interaction);
+      return simple(interaction, "submitresult");
 
     case "setcooverseer":
-      return setCoOverseer(interaction);
+      return simple(interaction, "setcooverseer");
 
     case "removeoverseer":
-      return removeOverseer(interaction);
+      return simple(interaction, "removeoverseer");
 
     case "transferleague":
-      return transferLeague(interaction);
+      return simple(interaction, "transferleague");
 
     default:
       return interaction.reply({
@@ -61,7 +63,7 @@ export async function handleCommand(
 }
 
 /* =========================
-   PERMISSION HELPER
+   PERMISSIONS
 ========================= */
 
 function isAdmin(
@@ -126,10 +128,7 @@ async function setup(
     .maybeSingle();
 
   if (guildCheckError) {
-    console.error(
-      "Guild lookup error:",
-      guildCheckError,
-    );
+    console.error(guildCheckError);
 
     return interaction.editReply(
       "❌ Couldn't check the server connection.",
@@ -152,10 +151,7 @@ async function setup(
     .maybeSingle();
 
   if (leagueCheckError) {
-    console.error(
-      "League lookup error:",
-      leagueCheckError,
-    );
+    console.error(leagueCheckError);
 
     return interaction.editReply(
       "❌ Couldn't check whether that league already exists.",
@@ -182,33 +178,26 @@ async function setup(
     .single();
 
   if (leagueError || !league) {
-    console.error(
-      "League creation error:",
-      leagueError,
-    );
+    console.error(leagueError);
 
     return interaction.editReply(
       "❌ Couldn't create the league.",
     );
   }
 
-  const { error: guildError } =
-    await supabase
-      .from("guild_settings")
-      .insert({
-        guild_id: guildId,
-        guild_name:
-          interaction.guild?.name ?? null,
-        league_id: league.id,
-        updated_by_discord_id:
-          interaction.user.id,
-      });
+  const {
+    error: guildError,
+  } = await supabase
+    .from("guild_settings")
+    .insert({
+      guild_id: guildId,
+      guild_name: interaction.guild?.name ?? null,
+      league_id: league.id,
+      updated_by_discord_id: interaction.user.id,
+    });
 
   if (guildError) {
-    console.error(
-      "Guild connection error:",
-      guildError,
-    );
+    console.error(guildError);
 
     await supabase
       .from("leagues")
@@ -220,11 +209,7 @@ async function setup(
     );
   }
 
-  for (
-    let i = 0;
-    i < divisionNames.length;
-    i++
-  ) {
+  for (let i = 0; i < divisionNames.length; i++) {
     const { error } = await supabase
       .from("divisions")
       .insert({
@@ -251,8 +236,7 @@ async function setup(
             `${["🥇", "🥈", "🥉"][index] ?? "📋"} ${division}`,
         )
         .join("\n") +
-      `\n\n👑 You are now the primary Overseer.` +
-      `\n🌐 Manage the rest through NOVA.`,
+      `\n\n👑 You are now the primary Overseer.\n🌐 Manage the rest through NOVA.`,
   );
 }
 
@@ -286,14 +270,12 @@ async function addTeam(
     true,
   );
 
-  const divisionName =
-    interaction.options.getString(
-      "division",
-      true,
-    );
+  const divisionName = interaction.options.getString(
+    "division",
+    true,
+  );
 
-  const logo =
-    interaction.options.getAttachment("logo");
+  const logo = interaction.options.getAttachment("logo");
 
   const {
     data: settings,
@@ -304,18 +286,9 @@ async function addTeam(
     .eq("guild_id", guildId)
     .maybeSingle();
 
-  if (settingsError) {
-    console.error(
-      "Settings lookup error:",
-      settingsError,
-    );
+  if (settingsError || !settings?.league_id) {
+    console.error(settingsError);
 
-    return interaction.editReply(
-      "❌ Couldn't check the server connection.",
-    );
-  }
-
-  if (!settings?.league_id) {
     return interaction.editReply(
       "❌ This server isn't connected to a league.",
     );
@@ -326,16 +299,13 @@ async function addTeam(
     error: divisionError,
   } = await supabase
     .from("divisions")
-    .select("id,name")
+    .select("id,name,status")
     .eq("league_id", settings.league_id)
     .ilike("name", divisionName)
     .maybeSingle();
 
   if (divisionError) {
-    console.error(
-      "Division lookup error:",
-      divisionError,
-    );
+    console.error(divisionError);
 
     return interaction.editReply(
       "❌ Couldn't find that division.",
@@ -354,15 +324,14 @@ async function addTeam(
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
 
-  const { data: existingTeam } =
-    await supabase
-      .from("teams")
-      .select("id")
-      .eq("league_id", settings.league_id)
-      .or(
-        `name.ilike.${teamName},slug.eq.${teamSlug}`,
-      )
-      .maybeSingle();
+  const {
+    data: existingTeam,
+  } = await supabase
+    .from("teams")
+    .select("id")
+    .eq("league_id", settings.league_id)
+    .or(`name.ilike.${teamName},slug.eq.${teamSlug}`)
+    .maybeSingle();
 
   if (existingTeam) {
     return interaction.editReply(
@@ -383,10 +352,7 @@ async function addTeam(
       });
 
   if (teamError) {
-    console.error(
-      "Team creation error:",
-      teamError,
-    );
+    console.error(teamError);
 
     return interaction.editReply(
       "❌ Couldn't create the team.",
@@ -471,10 +437,7 @@ async function makeDivision(
       });
 
   if (error) {
-    console.error(
-      "Division creation error:",
-      error,
-    );
+    console.error(error);
 
     return interaction.editReply(
       "❌ Couldn't create the division.",
@@ -516,25 +479,12 @@ async function startDivision(
     true,
   );
 
-  const {
-    data: settings,
-    error: settingsError,
-  } = await supabase
-    .from("guild_settings")
-    .select("league_id")
-    .eq("guild_id", guildId)
-    .maybeSingle();
-
-  if (settingsError) {
-    console.error(
-      "Settings lookup error:",
-      settingsError,
-    );
-
-    return interaction.editReply(
-      "❌ Couldn't check the server connection.",
-    );
-  }
+  const { data: settings } =
+    await supabase
+      .from("guild_settings")
+      .select("league_id")
+      .eq("guild_id", guildId)
+      .maybeSingle();
 
   if (!settings?.league_id) {
     return interaction.editReply(
@@ -542,28 +492,13 @@ async function startDivision(
     );
   }
 
-  const {
-    data: division,
-    error: divisionError,
-  } = await supabase
-    .from("divisions")
-    .select(
-      "id,name,status,gameweek_interval_days",
-    )
-    .eq("league_id", settings.league_id)
-    .ilike("name", name)
-    .maybeSingle();
-
-  if (divisionError) {
-    console.error(
-      "Division lookup error:",
-      divisionError,
-    );
-
-    return interaction.editReply(
-      "❌ Couldn't find that division.",
-    );
-  }
+  const { data: division } =
+    await supabase
+      .from("divisions")
+      .select("id,name,status")
+      .eq("league_id", settings.league_id)
+      .ilike("name", name)
+      .maybeSingle();
 
   if (!division) {
     return interaction.editReply(
@@ -571,67 +506,27 @@ async function startDivision(
     );
   }
 
-  if (division.status === "active") {
-    return interaction.editReply(
-      `⚠️ **${name}** is already active.`,
-    );
-  }
-
-  if (division.status === "ended") {
-    return interaction.editReply(
-      `❌ **${name}** has already ended.`,
-    );
-  }
-
-  try {
-    const result = await generateFixtures(
-      division.id,
-      new Date(),
-    );
-
-    const {
-      error: updateError,
-    } = await supabase
+  const { error } =
+    await supabase
       .from("divisions")
       .update({
         status: "active",
-        start_date:
-          new Date().toISOString(),
+        start_date: new Date().toISOString(),
         ended_at: null,
       })
       .eq("id", division.id);
 
-    if (updateError) {
-      console.error(
-        "Division activation error:",
-        updateError,
-      );
-
-      return interaction.editReply(
-        "❌ Fixtures were created, but the division couldn't be started.",
-      );
-    }
+  if (error) {
+    console.error(error);
 
     return interaction.editReply(
-      `🟢 **${name}** has officially started!\n\n` +
-        `📅 ${result.gameweekCount} gameweeks created\n` +
-        `⚽ ${result.fixtureCount} fixtures created\n` +
-        `⏱️ Gameweek interval: ${result.intervalDays} days`,
-    );
-  } catch (error) {
-    console.error(
-      "Fixture generation error:",
-      error,
-    );
-
-    return interaction.editReply(
-      `❌ Couldn't start **${name}**.\n\n${
-        error instanceof Error
-          ? error.message
-          : "Unknown error."
-      }`,
+      "❌ Couldn't start the division.",
     );
   }
+
+  return interaction.editReply(
+    `🟢 **${name}** has officially started!`,
+  );
 }
 
 /* =========================
@@ -696,16 +591,12 @@ async function endDivision(
       .from("divisions")
       .update({
         status: "ended",
-        ended_at:
-          new Date().toISOString(),
+        ended_at: new Date().toISOString(),
       })
       .eq("id", division.id);
 
   if (error) {
-    console.error(
-      "Division ending error:",
-      error,
-    );
+    console.error(error);
 
     return interaction.editReply(
       "❌ Couldn't end the division.",
@@ -718,10 +609,10 @@ async function endDivision(
 }
 
 /* =========================
-   SUBMIT RESULT
+   GENERATE FIXTURES
 ========================= */
 
-async function submitResult(
+async function generateFixtures(
   interaction: ChatInputCommandInteraction,
 ) {
   if (!isAdmin(interaction)) {
@@ -732,60 +623,347 @@ async function submitResult(
     });
   }
 
-  return interaction.reply({
-    content:
-      "🛠️ `/submitresult` is the next fixture feature. Fixture/team result parsing will be connected next.",
-    ephemeral: true,
-  });
+  await interaction.deferReply({ ephemeral: true });
+
+  const guildId = interaction.guildId;
+
+  if (!guildId) {
+    return interaction.editReply(
+      "❌ Use this inside a server.",
+    );
+  }
+
+  const divisionName =
+    interaction.options.getString(
+      "division",
+      true,
+    );
+
+  const { data: settings, error: settingsError } =
+    await supabase
+      .from("guild_settings")
+      .select("league_id")
+      .eq("guild_id", guildId)
+      .maybeSingle();
+
+  if (settingsError || !settings?.league_id) {
+    console.error(settingsError);
+
+    return interaction.editReply(
+      "❌ This server isn't connected to a league.",
+    );
+  }
+
+  const {
+    data: division,
+    error: divisionError,
+  } = await supabase
+    .from("divisions")
+    .select(
+      "id,name,status,start_date,gameweek_interval_days",
+    )
+    .eq("league_id", settings.league_id)
+    .ilike("name", divisionName)
+    .maybeSingle();
+
+  if (divisionError) {
+    console.error(divisionError);
+
+    return interaction.editReply(
+      "❌ Couldn't find that division.",
+    );
+  }
+
+  if (!division) {
+    return interaction.editReply(
+      `❌ Division **${divisionName}** doesn't exist.`,
+    );
+  }
+
+  if (division.status !== "active") {
+    return interaction.editReply(
+      `❌ Division **${division.name}** isn't active yet.\n\nUse \`/startdivision\` first.`,
+    );
+  }
+
+  const {
+    data: teams,
+    error: teamsError,
+  } = await supabase
+    .from("teams")
+    .select("id,name,division_id")
+    .eq("division_id", division.id)
+    .order("name");
+
+  if (teamsError) {
+    console.error(teamsError);
+
+    return interaction.editReply(
+      "❌ Couldn't load the teams.",
+    );
+  }
+
+  if (!teams || teams.length < 2) {
+    return interaction.editReply(
+      "❌ You need at least 2 teams in the division.",
+    );
+  }
+
+  const {
+    data: existingFixtures,
+    error: existingFixturesError,
+  } = await supabase
+    .from("fixtures")
+    .select("id");
+
+  if (existingFixturesError) {
+    console.error(existingFixturesError);
+
+    return interaction.editReply(
+      "❌ Couldn't check existing fixtures.",
+    );
+  }
+
+  if (existingFixtures && existingFixtures.length > 0) {
+    const {
+      data: divisionFixtures,
+    } = await supabase
+      .from("fixtures")
+      .select("id")
+      .eq("division_id", division.id)
+      .limit(1);
+
+    if (divisionFixtures && divisionFixtures.length > 0) {
+      return interaction.editReply(
+        `⚠️ Fixtures already exist for **${division.name}**.`,
+      );
+    }
+  }
+
+  /*
+   * Round-robin scheduler.
+   *
+   * Every team plays every other team once at home
+   * and once away.
+   *
+   * One round = one gameweek.
+   */
+
+  let scheduleTeams = [...teams];
+
+  if (scheduleTeams.length % 2 !== 0) {
+    scheduleTeams.push({
+      id: null,
+      name: "BYE",
+      division_id: division.id,
+    });
+  }
+
+  const totalTeams = scheduleTeams.length;
+  const roundsPerLeg = totalTeams - 1;
+
+  const matchesPerRound = totalTeams / 2;
+
+  const rounds: {
+    home: typeof scheduleTeams[number];
+    away: typeof scheduleTeams[number];
+  }[][] = [];
+
+  let rotating = [...scheduleTeams];
+
+  for (let round = 0; round < roundsPerLeg; round++) {
+    const matches: typeof rounds[number] = [];
+
+    for (
+      let i = 0;
+      i < matchesPerRound;
+      i++
+    ) {
+      const first = rotating[i];
+      const second =
+        rotating[totalTeams - 1 - i];
+
+      if (
+        first.id === null ||
+        second.id === null
+      ) {
+        continue;
+      }
+
+      const home =
+        round % 2 === 0
+          ? first
+          : second;
+
+      const away =
+        round % 2 === 0
+          ? second
+          : first;
+
+      matches.push({
+        home,
+        away,
+      });
+    }
+
+    rounds.push(matches);
+
+    rotating = [
+      rotating[0],
+      rotating[totalTeams - 1],
+      ...rotating.slice(1, totalTeams - 1),
+    ];
+  }
+
+  const firstStart = division.start_date
+    ? new Date(division.start_date)
+    : new Date();
+
+  const intervalDays =
+    division.gameweek_interval_days || 3;
+
+  let fixtureCount = 0;
+
+  for (
+    let roundIndex = 0;
+    roundIndex < rounds.length * 2;
+    roundIndex++
+  ) {
+    const firstLeg =
+      roundIndex < rounds.length;
+
+    const sourceRound =
+      rounds[
+        firstLeg
+          ? roundIndex
+          : roundIndex - rounds.length
+      ];
+
+    const gameweekNumber =
+      roundIndex + 1;
+
+    const gameweekStart =
+      new Date(firstStart);
+
+    gameweekStart.setDate(
+      gameweekStart.getDate() +
+        roundIndex * intervalDays,
+    );
+
+    /*
+     * Create gameweek.
+     */
+
+    const {
+      data: gameweek,
+      error: gameweekError,
+    } = await supabase
+      .from("gameweeks")
+      .insert({
+        division_id: division.id,
+        number: gameweekNumber,
+        starts_at:
+          gameweekStart.toISOString(),
+      })
+      .select()
+      .single();
+
+    if (gameweekError || !gameweek) {
+      console.error(
+        `Gameweek ${gameweekNumber} error:`,
+        gameweekError,
+      );
+
+      continue;
+    }
+
+    /*
+     * Create fixtures for this gameweek.
+     */
+
+    for (
+      let matchIndex = 0;
+      matchIndex < sourceRound.length;
+      matchIndex++
+    ) {
+      const match = sourceRound[matchIndex];
+
+      let homeTeam = match.home;
+      let awayTeam = match.away;
+
+      /*
+       * Reverse home/away in the second leg.
+       */
+
+      if (!firstLeg) {
+        homeTeam = match.away;
+        awayTeam = match.home;
+      }
+
+      const kickoff =
+        new Date(gameweekStart);
+
+      kickoff.setHours(
+        kickoff.getHours() +
+          matchIndex * 2,
+      );
+
+      const { error: fixtureError } =
+        await supabase
+          .from("fixtures")
+          .insert({
+            league_id: settings.league_id,
+            division_id: division.id,
+            home_team_id: homeTeam.id,
+            away_team_id: awayTeam.id,
+            kickoff_at:
+              kickoff.toISOString(),
+            status: "scheduled",
+            home_score: null,
+            away_score: null,
+            competition: "League",
+            gameweek: gameweekNumber,
+          });
+
+      if (fixtureError) {
+        console.error(
+          "Fixture creation error:",
+          fixtureError,
+        );
+
+        continue;
+      }
+
+      fixtureCount++;
+    }
+  }
+
+  return interaction.editReply(
+    `✅ Fixtures generated for **${division.name}**!\n\n` +
+      `📅 Gameweeks: **${rounds.length * 2}**\n` +
+      `⚽ Fixtures: **${fixtureCount}**\n` +
+      `⏱️ Gameweek interval: **${intervalDays} days**\n\n` +
+      `🏠 Home & away fixtures have been created.`,
+  );
 }
 
 /* =========================
-   CO-OVERSEER
-   NOVA SITE ONLY
+   SIMPLE
 ========================= */
 
-async function setCoOverseer(
+async function simple(
   interaction: ChatInputCommandInteraction,
+  command: string,
 ) {
   return interaction.reply({
     content:
-      "🌐 Co-Overseer management is handled through the NOVA site.",
+      `🛠️ **/${command}** is registered and ready to be connected to NOVA.`,
     ephemeral: true,
   });
 }
 
 /* =========================
-   REMOVE OVERSEER
-   NOVA SITE ONLY
-========================= */
-
-async function removeOverseer(
-  interaction: ChatInputCommandInteraction,
-) {
-  return interaction.reply({
-    content:
-      "🌐 Overseer management is handled through the NOVA site.",
-    ephemeral: true,
-  });
-}
-
-/* =========================
-   TRANSFER LEAGUE
-   NOVA SITE ONLY
-========================= */
-
-async function transferLeague(
-  interaction: ChatInputCommandInteraction,
-) {
-  return interaction.reply({
-    content:
-      "🌐 League transfers are handled through the NOVA site.",
-    ephemeral: true,
-  });
-}
-
-/* =========================
-   SLASH COMMAND REGISTRATION
+   SLASH COMMANDS
 ========================= */
 
 const commands = [
@@ -881,6 +1059,18 @@ const commands = [
     ),
 
   new SlashCommandBuilder()
+    .setName("generatefixtures")
+    .setDescription(
+      "Generate a full home and away fixture schedule",
+    )
+    .addStringOption((option) =>
+      option
+        .setName("division")
+        .setDescription("Division name")
+        .setRequired(true),
+    ),
+
+  new SlashCommandBuilder()
     .setName("submitresult")
     .setDescription(
       "Submit a match result",
@@ -889,23 +1079,27 @@ const commands = [
   new SlashCommandBuilder()
     .setName("setcooverseer")
     .setDescription(
-      "Manage Co-Overseer on NOVA",
+      "Add a Co-Overseer",
     ),
 
   new SlashCommandBuilder()
     .setName("removeoverseer")
     .setDescription(
-      "Manage Overseers on NOVA",
+      "Remove a Co-Overseer",
     ),
 
   new SlashCommandBuilder()
     .setName("transferleague")
     .setDescription(
-      "Transfer league on NOVA",
+      "Transfer league connection",
+    )
+    .addStringOption((option) =>
+      option
+        .setName("league")
+        .setDescription("League name")
+        .setRequired(true),
     ),
-].map((command) =>
-  command.toJSON(),
-);
+].map((command) => command.toJSON());
 
 /* =========================
    REGISTER COMMANDS
