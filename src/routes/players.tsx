@@ -1,6 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+
 type Player = {
   id: string;
   username: string | null;
@@ -13,20 +14,25 @@ type Player = {
     logo_url: string | null;
   } | null;
 };
+
 export const Route = createFileRoute("/players")({
   component: Players,
 });
+
 function Players() {
   const [players, setPlayers] = useState<Player[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+
   useEffect(() => {
     loadPlayers();
   }, []);
+
   async function loadPlayers() {
     setLoading(true);
     setError(null);
+
     const { data, error } = await supabase
       .from("players")
       .select(`
@@ -42,18 +48,23 @@ function Players() {
         )
       `)
       .order("display_name", { ascending: true });
+
     if (error) {
       console.error("Failed to load players:", error);
       setError("Couldn't load players.");
       setLoading(false);
       return;
     }
+
     setPlayers((data ?? []) as Player[]);
     setLoading(false);
   }
+
   const filteredPlayers = players.filter((player) => {
     const query = search.toLowerCase().trim();
+
     if (!query) return true;
+
     return (
       player.display_name?.toLowerCase().includes(query) ||
       player.username?.toLowerCase().includes(query) ||
@@ -61,6 +72,7 @@ function Players() {
       player.position?.toLowerCase().includes(query)
     );
   });
+
   if (loading) {
     return (
       <div className="min-h-[60vh] flex items-center justify-center">
@@ -70,6 +82,7 @@ function Players() {
       </div>
     );
   }
+
   if (error) {
     return (
       <div className="min-h-[60vh] flex items-center justify-center">
@@ -77,6 +90,7 @@ function Players() {
       </div>
     );
   }
+
   return (
     <div className="min-h-screen px-4 py-8 md:px-8">
       <div className="mx-auto max-w-6xl">
@@ -84,13 +98,16 @@ function Players() {
           <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
             Player index
           </p>
+
           <h1 className="mt-2 text-3xl font-bold tracking-tight">
             Players
           </h1>
+
           <p className="mt-2 text-sm text-muted-foreground">
             Browse players registered in NOVA.
           </p>
         </div>
+
         <div className="mb-6">
           <input
             type="search"
@@ -100,11 +117,13 @@ function Players() {
             className="w-full rounded-lg border bg-background px-4 py-3 text-sm outline-none transition focus:ring-2 focus:ring-ring"
           />
         </div>
+
         {filteredPlayers.length === 0 ? (
           <div className="rounded-xl border bg-card px-6 py-12 text-center">
             <h2 className="text-lg font-semibold">
               {search ? "No players found" : "No players available"}
             </h2>
+
             <p className="mt-2 text-sm text-muted-foreground">
               {search
                 ? "Try a different player, username, team or position."
@@ -114,9 +133,11 @@ function Players() {
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {filteredPlayers.map((player) => (
-              <div
+              <Link
                 key={player.id}
-                className="rounded-xl border bg-card p-4 transition hover:bg-accent/40"
+                to="/players/$playerId"
+                params={{ playerId: player.id }}
+                className="block rounded-xl border bg-card p-4 transition hover:bg-accent/40 hover:shadow-sm"
               >
                 <div className="flex items-center gap-4">
                   <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full border bg-background">
@@ -136,12 +157,14 @@ function Players() {
                       </span>
                     )}
                   </div>
+
                   <div className="min-w-0">
                     <h2 className="truncate font-semibold">
                       {player.display_name ??
                         player.username ??
                         "Unknown player"}
                     </h2>
+
                     {player.username &&
                       player.display_name &&
                       player.username !== player.display_name && (
@@ -151,15 +174,17 @@ function Players() {
                       )}
                   </div>
                 </div>
+
                 <div className="mt-4 flex items-center justify-between border-t pt-3">
                   <span className="text-xs font-medium text-muted-foreground">
                     {player.position ?? "Position not set"}
                   </span>
+
                   <span className="truncate pl-4 text-xs font-medium">
                     {player.team?.name ?? "Free agent"}
                   </span>
                 </div>
-              </div>
+              </Link>
             ))}
           </div>
         )}
