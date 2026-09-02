@@ -7,17 +7,79 @@ import {
   Trophy,
   Users,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { NovaHeader, NovaSidebar } from "../components/nova/NovaSidebar";
+
+type Fixture = {
+  id: string;
+  home_team_id: string;
+  away_team_id: string;
+  home_score: number | null;
+  away_score: number | null;
+  status: string | null;
+  kickoff_at: string | null;
+  gameweek: number | null;
+  competition: string | null;
+  matchday_graphic_url: string | null;
+  home_team: {
+    id: string;
+    name: string;
+    logo_url: string | null;
+  } | null;
+  away_team: {
+    id: string;
+    name: string;
+    logo_url: string | null;
+  } | null;
+};
+
+type Result = {
+  id: string;
+  fixture_id: string;
+  home_score: number;
+  away_score: number;
+  completed_at: string | null;
+  fixture: Fixture | null;
+};
+
+type League = {
+  id: string;
+  name: string;
+};
+
+type Transfer = {
+  id: string;
+  created_at: string | null;
+  transfer_type: string | null;
+  player: {
+    id: string;
+    display_name: string | null;
+    username: string | null;
+  } | null;
+  from_team: {
+    id: string;
+    name: string;
+    logo_url: string | null;
+  } | null;
+  to_team: {
+    id: string;
+    name: string;
+    logo_url: string | null;
+  } | null;
+};
+
 export const Route = createFileRoute("/")({
   ssr: false,
+
   beforeLoad: async () => {
     const { data } = await supabase.auth.getSession();
+
     if (!data.session) {
       throw redirect({ to: "/auth" as any });
     }
   },
+
   head: () => ({
     meta: [
       { title: "NOVA — VRFS" },
@@ -28,34 +90,215 @@ export const Route = createFileRoute("/")({
       },
     ],
   }),
+
   component: Index,
 });
-const sections = [
-  {
-    title: "Today's fixtures",
-    icon: CalendarDays,
-    empty: "No fixtures scheduled for today",
-  },
-  {
-    title: "Upcoming fixtures",
-    icon: Clock3,
-    empty: "No upcoming fixtures",
-  },
-  {
-    title: "Recent results",
-    icon: Trophy,
-    empty: "No results available",
-  },
-];
+
 function Index() {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [timeLeft, setTimeLeft] = useState(getTimeLeft());
+  const [fixtures, setFixtures] = useState<Fixture[]>([]);
+  const [results, setResults] = useState<Result[]>([]);
+  const [leagues, setLeagues] = useState<League[]>([]);
+  const [transfers, setTransfers] = useState<Transfer[]>([]);
+  const [teamCount, setTeamCount] = useState(0);
+  const [playerCount, setPlayerCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [selectedDay, setSelectedDay] = useState<
+    "yesterday" | "today" | "tomorrow"
+  >("today");
+
   useEffect(() => {
-    const timer = window.setInterval(() => {
-      setTimeLeft(getTimeLeft());
-    }, 1000);
-    return () => window.clearInterval(timer);
+    loadHomeData();
   }, []);
+
+  async function loadHomeData() {
+    setLoading(true);
+    setError(null);
+
+    const [
+      fixturesResponse,
+      resultsResponse,
+      leaguesResponse,
+      transfersResponse,
+      teamsResponse,
+      playersResponse,
+    ] = await Promise.all([
+      supabase
+        .from("fixtures")
+        .select(
+          `
+            id,
+            home_team_id,
+            away_team_id,
+            home_score,
+            away_score,
+            status,
+            kickoff_at,
+            gameweek,
+            competition,
+            matchday_graphic_url,
+            home_team:teams!fixtures_home_team_id_fkey(
+              id,
+              name,
+              logo_url
+            ),
+            away_team:teams!fixtures_away_team_id_fkey(
+              id,
+              name,
+              logo_url
+            )
+          `,
+        )
+        .order("kickoff_at", { ascending: true }),
+
+      supabase
+        .from("results")
+        .select(
+          `
+            id,
+            fixture_id,
+            home_score,
+            away_score,
+            completed_at,
+            fixture:fixtures(
+              id,
+              home_team_id,
+              away_team_id,
+              home_score,
+              away_score,
+              status,
+              kickoff_at,
+              gameweek,
+              competition,
+              matchday_graphic_url,
+              home_team:teams!fixtures_home_team_id_fkey(
+                id,
+                name,
+                logo_url
+              ),
+              away_team:teams!fixtures_away_team_id_fkey(
+                id,
+                name,
+                logo_url
+              )
+            )
+          `,
+        )
+        .order("completed_at", { ascending: false })
+        .limit(8),
+
+      supabase
+        .from("leagues")
+        .select("id, name")
+        .order("name", { ascending: true })
+        .limit(6),
+
+      supabase
+        .from("transfers")
+        .select(
+          `
+            id,
+            created_at,
+            transfer_type,
+            player:players(
+              id,
+              display_name,
+              username
+            ),
+            from_team:teams!transfers_from_team_id_fkey(
+              id,
+              name,
+              logo_url
+            ),
+            to_team:teams!transfers_to_team_id_fkey(
+              id,
+              name,
+              logo_url
+            )
+          `,
+        )
+        .order("created_at", { ascending: false })
+        .limit(5),
+
+      supabase.from("teams").select("id", { count: "exact", head: true }),
+
+      supabase.from("players").select("id", { count: "exact", head: true }),
+    ]);
+
+    const firstError =
+      fixturesResponse.error ??
+      resultsResponse.error ??
+      leaguesResponse.error ??
+      transfersResponse.error ??
+      teamsResponse.error ??
+      playersResponse.error;
+
+    if (firstError) {
+      setError(firstError.message);
+      setLoading(false);
+      return;
+    }
+
+    setFixtures((fixturesResponse.data ?? []) as unknown as Fixture[]);
+    setResults((resultsResponse.data ?? []) as unknown as Result[]);
+    setLeagues((leaguesResponse.data ?? []) as League[]);
+    setTransfers((transfersResponse.data ?? []) as unknown as Transfer[]);
+    setTeamCount(teamsResponse.count ?? 0);
+    setPlayerCount(playersResponse.count ?? 0);
+    setLoading(false);
+  }
+
+  const now = Date.now();
+
+  const upcomingFixtures = useMemo(
+    () =>
+      fixtures
+        .filter(
+          (fixture) =>
+            fixture.kickoff_at &&
+            new Date(fixture.kickoff_at).getTime() >= now &&
+            !isCompleted(fixture),
+        )
+        .sort(
+          (a, b) =>
+            new Date(a.kickoff_at!).getTime() -
+            new Date(b.kickoff_at!).getTime(),
+        ),
+    [fixtures, now],
+  );
+
+  const featuredMatch = upcomingFixtures[0] ?? null;
+
+  const selectedDateFixtures = useMemo(() => {
+    const offset =
+      selectedDay === "yesterday"
+        ? -1
+        : selectedDay === "tomorrow"
+          ? 1
+          : 0;
+
+    return fixtures
+      .filter((fixture) => isSameCalendarDay(fixture.kickoff_at, offset))
+      .sort(
+        (a, b) =>
+          new Date(a.kickoff_at ?? 0).getTime() -
+          new Date(b.kickoff_at ?? 0).getTime(),
+      );
+  }, [fixtures, selectedDay]);
+
+  const liveFixtures = fixtures.filter((fixture) => isLive(fixture));
+
+  const recentResults = results
+    .filter((result) => result.fixture)
+    .sort(
+      (a, b) =>
+        new Date(b.completed_at ?? 0).getTime() -
+        new Date(a.completed_at ?? 0).getTime(),
+    )
+    .slice(0, 5);
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <div className="flex min-h-screen">
@@ -63,114 +306,235 @@ function Index() {
           mobileOpen={mobileOpen}
           onClose={() => setMobileOpen(false)}
         />
+
         <div className="min-w-0 flex-1">
           <NovaHeader onMenu={() => setMobileOpen(true)} />
+
           <main
             id="main"
             className="mx-auto max-w-[1500px] px-5 pb-16 pt-6 lg:px-10"
           >
-            {/* FEATURED MATCH */}
-            <section className="relative -mx-5 mb-12 overflow-hidden sm:-mx-8 lg:-mx-10">
-              {/* Graphic */}
-              <div className="relative w-full">
-                <img
-                  src="https://user28025.na.imgto.link/public/20260830/c3b8018b-ffcd-4a79-b3ca-584b1f5c52da.avif"
-                  alt="Hannover 96 vs Queen Edith FC"
-                  className="block h-auto w-full object-contain"
-                />
-                {/* Bottom fade ONLY */}
-                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[45%] bg-gradient-to-t from-background via-background/70 to-transparent" />
+            {error && (
+              <div className="mb-6 border border-destructive/30 bg-destructive/5 px-5 py-4 text-sm text-destructive">
+                {error}
               </div>
-              {/* Match information */}
-              <div className="relative -mt-20 px-5 sm:-mt-28 sm:px-8 lg:-mt-36 lg:px-10">
-                <p className="mb-3 text-xs font-bold uppercase tracking-[0.28em] text-muted-foreground">
-                  Match Centre
-                </p>
-                <div className="flex items-center gap-4">
-                  <img
-                    src="https://imagepaste.org/i/uq8vd2hb.png"
-                    alt="Hannover 96"
-                    className="size-12 object-contain sm:size-16"
-                  />
-                  <h1 className="text-3xl font-black uppercase tracking-[-0.05em] sm:text-5xl lg:text-6xl">
-                    Hannover 96
-                  </h1>
-                  <span className="text-sm font-bold text-muted-foreground sm:text-lg">
-                    VS
-                  </span>
-                  <span className="text-3xl font-black uppercase tracking-[-0.05em] sm:text-5xl lg:text-6xl">
-                    QE
-                  </span>
-                </div>
-                <p className="mt-4 text-sm font-bold uppercase tracking-[0.18em]">
-                  VNO FA CUP FINAL
-                </p>
-                <p className="mt-2 text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
-                  4:30 PM K.O. · LIVE ON NOVA TV
-                </p>
-                <div className="mt-5">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-muted-foreground">
-                    Kickoff countdown
-                  </p>
-                  <p className="mt-1 text-3xl font-black tracking-tight sm:text-4xl">
-                    {formatTimeLeft(timeLeft)}
-                  </p>
-                </div>
-              </div>
-            </section>
-            {/* MATCH CENTRE */}
-            <section className="mb-5">
+            )}
+
+            <FeaturedMatch
+              fixture={featuredMatch}
+              liveFixtures={liveFixtures}
+            />
+
+            <section className="mb-7">
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">
                 VRFS / Match Centre
               </p>
-              <h2 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">
+
+              <h1 className="mt-2 text-3xl font-black tracking-tight sm:text-4xl">
                 Match Centre
-              </h2>
+              </h1>
+
               <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
                 Fixtures, results and live action from across the VRFS
                 competitive scene.
               </p>
             </section>
-            {/* QUICK STATS */}
-            <section className="mb-5 grid grid-cols-2 border-y border-border md:grid-cols-4">
-              <Stat icon={Trophy} label="Active leagues" />
-              <Stat icon={CalendarDays} label="Fixtures tracked" />
-              <Stat icon={Users} label="Registered teams" />
-              <Stat icon={ShieldCheck} label="Players indexed" />
+
+            <section className="mb-8 grid grid-cols-2 border-y border-border md:grid-cols-4">
+              <Stat
+                icon={Trophy}
+                label="Active leagues"
+                value={leagues.length}
+              />
+
+              <Stat
+                icon={CalendarDays}
+                label="Fixtures tracked"
+                value={fixtures.length}
+              />
+
+              <Stat
+                icon={Users}
+                label="Registered teams"
+                value={teamCount}
+              />
+
+              <Stat
+                icon={ShieldCheck}
+                label="Players indexed"
+                value={playerCount}
+              />
             </section>
-            {/* FIXTURE SECTIONS */}
-            <div className="divide-y divide-border">
-              {sections.map(({ title, icon, empty }) => (
-                <FixtureSection
-                  key={title}
-                  title={title}
-                  Icon={icon}
-                  empty={empty}
-                />
-              ))}
-            </div>
-            {/* LOWER SECTIONS */}
-            <div className="mt-4 grid divide-y divide-border lg:grid-cols-2 lg:divide-x lg:divide-y-0">
-              <SimpleSection
-                title="Featured leagues"
-                Icon={Trophy}
-                empty="No leagues created yet"
-              />
-              <SimpleSection
-                title="Recent transfers"
-                Icon={Users}
-                empty="No transfers yet"
-                className="lg:pl-10"
-              />
-            </div>
-            <div className="mt-8 flex justify-end">
-              <Link
-                to={"/leagues" as any}
-                className="text-sm font-semibold text-muted-foreground transition hover:text-foreground"
-              >
-                Explore leagues
-                <ChevronRight className="ml-1 inline size-4" />
-              </Link>
+
+            <section className="mb-10">
+              <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                    Matchday
+                  </p>
+
+                  <h2 className="mt-1 text-2xl font-bold tracking-tight">
+                    Fixtures & results
+                  </h2>
+                </div>
+
+                <Link
+                  to={"/fixtures" as any}
+                  className="text-xs font-semibold text-muted-foreground transition hover:text-foreground"
+                >
+                  All fixtures
+                  <ChevronRight className="ml-1 inline size-3" />
+                </Link>
+              </div>
+
+              <div className="mb-6 flex border-b border-border">
+                <DayButton
+                  active={selectedDay === "yesterday"}
+                  onClick={() => setSelectedDay("yesterday")}
+                >
+                  Yesterday
+                </DayButton>
+
+                <DayButton
+                  active={selectedDay === "today"}
+                  onClick={() => setSelectedDay("today")}
+                >
+                  Today
+                </DayButton>
+
+                <DayButton
+                  active={selectedDay === "tomorrow"}
+                  onClick={() => setSelectedDay("tomorrow")}
+                >
+                  Tomorrow
+                </DayButton>
+              </div>
+
+              {loading ? (
+                <LoadingRows />
+              ) : selectedDateFixtures.length === 0 ? (
+                <EmptyState text="No fixtures scheduled for this day." />
+              ) : (
+                <FixtureGroups fixtures={selectedDateFixtures} />
+              )}
+            </section>
+
+            <section className="mb-10">
+              <div className="mb-5 flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                    Finished
+                  </p>
+
+                  <h2 className="mt-1 text-2xl font-bold tracking-tight">
+                    Recent results
+                  </h2>
+                </div>
+
+                <Link
+                  to={"/results" as any}
+                  className="text-xs font-semibold text-muted-foreground transition hover:text-foreground"
+                >
+                  All results
+                  <ChevronRight className="ml-1 inline size-3" />
+                </Link>
+              </div>
+
+              {recentResults.length === 0 ? (
+                <EmptyState text="No completed results yet." />
+              ) : (
+                <div className="divide-y divide-border border-y border-border">
+                  {recentResults.map((result) => (
+                    <ResultRow key={result.id} result={result} />
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <div className="grid gap-10 lg:grid-cols-2">
+              <section>
+                <div className="mb-5 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                      Competitions
+                    </p>
+
+                    <h2 className="mt-1 text-2xl font-bold tracking-tight">
+                      Featured leagues
+                    </h2>
+                  </div>
+
+                  <Link
+                    to={"/leagues" as any}
+                    className="text-xs font-semibold text-muted-foreground transition hover:text-foreground"
+                  >
+                    View all
+                    <ChevronRight className="ml-1 inline size-3" />
+                  </Link>
+                </div>
+
+                {leagues.length === 0 ? (
+                  <EmptyState text="No leagues created yet." />
+                ) : (
+                  <div className="divide-y divide-border border-y border-border">
+                    {leagues.map((league) => (
+                      <Link
+                        key={league.id}
+                        to={"/leagues/$leagueId" as any}
+                        params={{ leagueId: league.id }}
+                        className="flex items-center justify-between py-4 transition hover:bg-muted/30"
+                      >
+                        <span className="font-semibold">{league.name}</span>
+                        <ChevronRight className="size-4 text-muted-foreground" />
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section>
+                <div className="mb-5 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                      Market
+                    </p>
+
+                    <h2 className="mt-1 text-2xl font-bold tracking-tight">
+                      Recent transfers
+                    </h2>
+                  </div>
+
+                  <Link
+                    to={"/transfers" as any}
+                    className="text-xs font-semibold text-muted-foreground transition hover:text-foreground"
+                  >
+                    View all
+                    <ChevronRight className="ml-1 inline size-3" />
+                  </Link>
+                </div>
+
+                {transfers.length === 0 ? (
+                  <EmptyState text="No transfers yet." />
+                ) : (
+                  <div className="divide-y divide-border border-y border-border">
+                    {transfers.map((transfer) => (
+                      <div key={transfer.id} className="py-4">
+                        <p className="font-semibold">
+                          {transfer.player?.display_name ??
+                            transfer.player?.username ??
+                            "Unknown player"}
+                        </p>
+
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {transfer.from_team?.name ?? "Free agent"}
+                          <span className="mx-2">→</span>
+                          {transfer.to_team?.name ?? "Unknown team"}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
             </div>
           </main>
         </div>
@@ -178,92 +542,421 @@ function Index() {
     </div>
   );
 }
-function FixtureSection({
-  title,
-  Icon,
-  empty,
+
+function FeaturedMatch({
+  fixture,
+  liveFixtures,
 }: {
-  title: string;
-  Icon: typeof CalendarDays;
-  empty: string;
+  fixture: Fixture | null;
+  liveFixtures: Fixture[];
 }) {
+  const [timeLeft, setTimeLeft] = useState(
+    fixture?.kickoff_at
+      ? getTimeLeft(new Date(fixture.kickoff_at).getTime())
+      : 0,
+  );
+
+  useEffect(() => {
+    if (!fixture?.kickoff_at) {
+      setTimeLeft(0);
+      return;
+    }
+
+    const update = () => {
+      setTimeLeft(getTimeLeft(new Date(fixture.kickoff_at!).getTime()));
+    };
+
+    update();
+
+    const timer = window.setInterval(update, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [fixture?.id, fixture?.kickoff_at]);
+
+  const liveMatch = liveFixtures[0];
+
+  if (!fixture && !liveMatch) {
+    return (
+      <section className="mb-12 border-y border-border py-16 text-center">
+        <p className="text-xs font-bold uppercase tracking-[0.25em] text-muted-foreground">
+          Match Centre
+        </p>
+
+        <h2 className="mt-3 text-3xl font-black tracking-tight">
+          No upcoming match
+        </h2>
+
+        <p className="mt-2 text-sm text-muted-foreground">
+          NOVA will automatically feature the next scheduled fixture here.
+        </p>
+      </section>
+    );
+  }
+
+  const match = liveMatch ?? fixture!;
+  const isOngoing = Boolean(liveMatch);
+
   return (
-    <section className="py-7">
-      <div className="mb-5 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Icon className="size-4 text-muted-foreground" />
-          <h3 className="text-sm font-semibold">{title}</h3>
+    <section className="relative -mx-5 mb-12 overflow-hidden sm:-mx-8 lg:-mx-10">
+      {match.matchday_graphic_url ? (
+        <div className="group relative overflow-hidden">
+          <img
+            src={match.matchday_graphic_url}
+            alt={`${match.home_team?.name ?? "Home"} vs ${
+              match.away_team?.name ?? "Away"
+            }`}
+            className="block h-auto w-full object-contain transition-transform duration-700 ease-out group-hover:scale-[1.015]"
+          />
+
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[55%] bg-gradient-to-t from-background via-background/80 to-transparent" />
         </div>
-        <Link
-          to={"/fixtures" as any}
-          className="text-xs font-medium text-muted-foreground transition hover:text-foreground"
-        >
-          View all
-          <ChevronRight className="ml-1 inline size-3" />
-        </Link>
-      </div>
-      <div className="min-h-28 border-t border-border py-9">
-        <div className="text-center">
-          <p className="text-sm text-muted-foreground">{empty}</p>
-          <p className="mt-1 text-xs text-muted-foreground/60">
-            Connect your league data to see updates here.
+      ) : (
+        <div className="h-[300px] bg-muted/20 sm:h-[420px]" />
+      )}
+
+      <div className="relative -mt-20 px-5 sm:-mt-28 sm:px-8 lg:-mt-36 lg:px-10">
+        {isOngoing ? (
+          <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-black uppercase tracking-[0.2em] text-red-500">
+            <span className="size-2 animate-pulse rounded-full bg-red-500" />
+            Ongoing
+          </div>
+        ) : (
+          <p className="mb-3 text-xs font-bold uppercase tracking-[0.28em] text-muted-foreground">
+            Match Centre
           </p>
+        )}
+
+        <div className="flex flex-wrap items-center gap-3 sm:gap-5">
+          <TeamBadge team={match.home_team} />
+
+          <h2 className="text-2xl font-black uppercase tracking-[-0.05em] sm:text-4xl lg:text-5xl">
+            {match.home_team?.name ?? "Home"}
+          </h2>
+
+          {isOngoing || isCompleted(match) ? (
+            <span className="text-2xl font-black sm:text-4xl">
+              {match.home_score ?? 0} - {match.away_score ?? 0}
+            </span>
+          ) : (
+            <span className="text-sm font-bold text-muted-foreground sm:text-lg">
+              VS
+            </span>
+          )}
+
+          <h2 className="text-2xl font-black uppercase tracking-[-0.05em] sm:text-4xl lg:text-5xl">
+            {match.away_team?.name ?? "Away"}
+          </h2>
+
+          <TeamBadge team={match.away_team} />
         </div>
+
+        <p className="mt-4 text-sm font-bold uppercase tracking-[0.18em]">
+          {match.competition ?? "VRFS MATCH"}
+        </p>
+
+        {match.kickoff_at && (
+          <p className="mt-2 text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
+            {formatKickoff(match.kickoff_at)}
+          </p>
+        )}
+
+        {!isOngoing && !isCompleted(match) && (
+          <div className="mt-5">
+            <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-muted-foreground">
+              Kickoff countdown
+            </p>
+
+            <p className="mt-1 text-3xl font-black tracking-tight sm:text-4xl">
+              {formatTimeLeft(timeLeft)}
+            </p>
+          </div>
+        )}
       </div>
     </section>
   );
 }
-function SimpleSection({
-  title,
-  Icon,
-  empty,
-  className = "",
-}: {
-  title: string;
-  Icon: typeof Trophy;
-  empty: string;
-  className?: string;
-}) {
+
+function FixtureGroups({ fixtures }: { fixtures: Fixture[] }) {
+  const groups = new Map<string, Fixture[]>();
+
+  for (const fixture of fixtures) {
+    const league = fixture.competition ?? "Other competitions";
+
+    if (!groups.has(league)) {
+      groups.set(league, []);
+    }
+
+    groups.get(league)!.push(fixture);
+  }
+
   return (
-    <section className={`py-7 ${className}`}>
-      <div className="mb-5 flex items-center gap-3">
-        <Icon className="size-4 text-muted-foreground" />
-        <h3 className="text-sm font-semibold">{title}</h3>
-      </div>
-      <div className="border-t border-border py-9">
-        <p className="text-sm text-muted-foreground">{empty}</p>
-      </div>
-    </section>
+    <div className="space-y-8">
+      {[...groups.entries()].map(([league, leagueFixtures]) => (
+        <div key={league}>
+          <div className="mb-3 flex items-center gap-2">
+            <Trophy className="size-4 text-muted-foreground" />
+            <h3 className="text-sm font-bold">{league}</h3>
+          </div>
+
+          <div className="divide-y divide-border border-y border-border">
+            {leagueFixtures.map((fixture) => (
+              <FixtureRow key={fixture.id} fixture={fixture} />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
+
+function FixtureRow({ fixture }: { fixture: Fixture }) {
+  const ongoing = isLive(fixture);
+  const completed = isCompleted(fixture);
+
+  return (
+    <div className="flex items-center justify-between gap-4 py-4">
+      <div className="flex min-w-0 flex-1 items-center justify-end gap-3 text-right">
+        <span className="truncate text-sm font-semibold">
+          {fixture.home_team?.name ?? "Home"}
+        </span>
+
+        <TeamBadge team={fixture.home_team} small />
+      </div>
+
+      <div className="min-w-[72px] text-center">
+        {ongoing && (
+          <p className="mb-1 text-[9px] font-black uppercase tracking-[0.18em] text-red-500">
+            Ongoing
+          </p>
+        )}
+
+        {completed ? (
+          <span className="text-sm font-black">
+            {fixture.home_score ?? 0} - {fixture.away_score ?? 0}
+          </span>
+        ) : (
+          <span className="text-xs font-bold text-muted-foreground">
+            {fixture.kickoff_at
+              ? new Date(fixture.kickoff_at).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })
+              : "TBC"}
+          </span>
+        )}
+      </div>
+
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        <TeamBadge team={fixture.away_team} small />
+
+        <span className="truncate text-sm font-semibold">
+          {fixture.away_team?.name ?? "Away"}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function ResultRow({ result }: { result: Result }) {
+  const fixture = result.fixture;
+
+  if (!fixture) return null;
+
+  return (
+    <div className="flex items-center justify-between gap-4 py-4">
+      <div className="flex min-w-0 flex-1 items-center justify-end gap-3 text-right">
+        <span className="truncate text-sm font-semibold">
+          {fixture.home_team?.name ?? "Home"}
+        </span>
+
+        <TeamBadge team={fixture.home_team} small />
+      </div>
+
+      <div className="text-sm font-black">
+        {result.home_score} - {result.away_score}
+      </div>
+
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        <TeamBadge team={fixture.away_team} small />
+
+        <span className="truncate text-sm font-semibold">
+          {fixture.away_team?.name ?? "Away"}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function TeamBadge({
+  team,
+  small = false,
+}: {
+  team: Fixture["home_team"];
+  small?: boolean;
+}) {
+  if (!team?.logo_url) {
+    return (
+      <div
+        className={`shrink-0 rounded-full border border-border bg-muted/30 ${
+          small ? "size-7" : "size-12"
+        }`}
+      />
+    );
+  }
+
+  return (
+    <img
+      src={team.logo_url}
+      alt=""
+      className={`shrink-0 object-contain ${
+        small ? "size-7" : "size-12 sm:size-16"
+      }`}
+    />
+  );
+}
+
 function Stat({
   icon: Icon,
   label,
+  value,
 }: {
   icon: typeof Trophy;
   label: string;
+  value: number;
 }) {
   return (
     <div className="px-4 py-5 sm:px-5">
       <Icon className="mb-3 size-4 text-muted-foreground" />
-      <p className="text-2xl font-bold">—</p>
+
+      <p className="text-2xl font-bold">{value}</p>
+
       <p className="mt-1 text-xs text-muted-foreground">{label}</p>
     </div>
   );
 }
-function getTimeLeft() {
-  const now = new Date();
-  const target = new Date(now);
-  target.setHours(16, 30, 0, 0);
-  return Math.max(0, target.getTime() - now.getTime());
+
+function DayButton({
+  active,
+  children,
+  onClick,
+}: {
+  active: boolean;
+  children: React.ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`border-b-2 px-4 py-3 text-xs font-bold uppercase tracking-[0.12em] transition ${
+        active
+          ? "border-foreground text-foreground"
+          : "border-transparent text-muted-foreground hover:text-foreground"
+      }`}
+    >
+      {children}
+    </button>
+  );
 }
+
+function EmptyState({ text }: { text: string }) {
+  return (
+    <div className="border-y border-border py-12 text-center">
+      <p className="text-sm text-muted-foreground">{text}</p>
+    </div>
+  );
+}
+
+function LoadingRows() {
+  return (
+    <div className="divide-y divide-border border-y border-border">
+      {[1, 2, 3].map((item) => (
+        <div key={item} className="flex items-center justify-between py-5">
+          <div className="h-4 w-32 animate-pulse bg-muted" />
+          <div className="h-4 w-12 animate-pulse bg-muted" />
+          <div className="h-4 w-32 animate-pulse bg-muted" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function isCompleted(fixture: Fixture) {
+  const status = (fixture.status ?? "").toLowerCase();
+
+  return (
+    status === "completed" ||
+    status === "finished" ||
+    status === "full_time" ||
+    status === "ft" ||
+    (fixture.home_score !== null && fixture.away_score !== null)
+  );
+}
+
+function isLive(fixture: Fixture) {
+  const status = (fixture.status ?? "").toLowerCase();
+
+  return (
+    status === "live" ||
+    status === "ongoing" ||
+    status === "in_progress" ||
+    status === "in-progress"
+  );
+}
+
+function isSameCalendarDay(
+  dateString: string | null,
+  offset: number,
+): boolean {
+  if (!dateString) return false;
+
+  const target = new Date();
+  target.setHours(0, 0, 0, 0);
+  target.setDate(target.getDate() + offset);
+
+  const date = new Date(dateString);
+
+  return (
+    date.getFullYear() === target.getFullYear() &&
+    date.getMonth() === target.getMonth() &&
+    date.getDate() === target.getDate()
+  );
+}
+
+function getTimeLeft(target: number) {
+  return Math.max(0, target - Date.now());
+}
+
 function formatTimeLeft(ms: number) {
   const totalSeconds = Math.floor(ms / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
+
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
+
+  if (days > 0) {
+    return `${String(days).padStart(2, "0")}:${String(hours).padStart(
+      2,
+      "0",
+    )}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(
+      2,
+      "0",
+    )}`;
+  }
+
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(
     2,
     "0",
   )}:${String(seconds).padStart(2, "0")}`;
+}
+
+function formatKickoff(dateString: string) {
+  return new Date(dateString).toLocaleString([], {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
