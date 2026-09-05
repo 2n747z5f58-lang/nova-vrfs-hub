@@ -2,7 +2,6 @@ import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import {
   CalendarDays,
   ChevronRight,
-  Clock3,
   ShieldCheck,
   Trophy,
   Users,
@@ -10,7 +9,11 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { NovaHeader, NovaSidebar } from "../components/nova/NovaSidebar";
-
+type Team = {
+  id: string;
+  name: string;
+  logo_url: string | null;
+};
 type Fixture = {
   id: string;
   home_team_id: string;
@@ -22,18 +25,9 @@ type Fixture = {
   gameweek: number | null;
   competition: string | null;
   matchday_graphic_url: string | null;
-  home_team: {
-    id: string;
-    name: string;
-    logo_url: string | null;
-  } | null;
-  away_team: {
-    id: string;
-    name: string;
-    logo_url: string | null;
-  } | null;
+  home_team: Team | null;
+  away_team: Team | null;
 };
-
 type Result = {
   id: string;
   fixture_id: string;
@@ -42,44 +36,33 @@ type Result = {
   completed_at: string | null;
   fixture: Fixture | null;
 };
-
 type League = {
   id: string;
   name: string;
 };
-
 type Transfer = {
   id: string;
-  created_at: string | null;
-  transfer_type: string | null;
+  transfer_date: string | null;
+  details: string | null;
+  fee: number | null;
+  status: string | null;
+  completed_at: string | null;
   player: {
     id: string;
     display_name: string | null;
     username: string | null;
   } | null;
-  from_team: {
-    id: string;
-    name: string;
-    logo_url: string | null;
-  } | null;
-  to_team: {
-    id: string;
-    name: string;
-    logo_url: string | null;
-  } | null;
+  from_team: Team | null;
+  to_team: Team | null;
 };
-
 export const Route = createFileRoute("/")({
   ssr: false,
-
   beforeLoad: async () => {
     const { data } = await supabase.auth.getSession();
-
     if (!data.session) {
       throw redirect({ to: "/auth" as any });
     }
   },
-
   head: () => ({
     meta: [
       { title: "NOVA — VRFS" },
@@ -90,10 +73,8 @@ export const Route = createFileRoute("/")({
       },
     ],
   }),
-
   component: Index,
 });
-
 function Index() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [fixtures, setFixtures] = useState<Fixture[]>([]);
@@ -104,19 +85,15 @@ function Index() {
   const [playerCount, setPlayerCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
   const [selectedDay, setSelectedDay] = useState<
     "yesterday" | "today" | "tomorrow"
   >("today");
-
   useEffect(() => {
     loadHomeData();
   }, []);
-
   async function loadHomeData() {
     setLoading(true);
     setError(null);
-
     const [
       fixturesResponse,
       resultsResponse,
@@ -152,7 +129,6 @@ function Index() {
           `,
         )
         .order("kickoff_at", { ascending: true }),
-
       supabase
         .from("results")
         .select(
@@ -188,20 +164,21 @@ function Index() {
         )
         .order("completed_at", { ascending: false })
         .limit(8),
-
       supabase
         .from("leagues")
         .select("id, name")
         .order("name", { ascending: true })
         .limit(6),
-
       supabase
         .from("transfers")
         .select(
           `
             id,
-            created_at,
-            transfer_type,
+            transfer_date,
+            details,
+            fee,
+            status,
+            completed_at,
             player:players(
               id,
               display_name,
@@ -221,12 +198,9 @@ function Index() {
         )
         .order("created_at", { ascending: false })
         .limit(5),
-
       supabase.from("teams").select("id", { count: "exact", head: true }),
-
       supabase.from("players").select("id", { count: "exact", head: true }),
     ]);
-
     const firstError =
       fixturesResponse.error ??
       resultsResponse.error ??
@@ -234,13 +208,11 @@ function Index() {
       transfersResponse.error ??
       teamsResponse.error ??
       playersResponse.error;
-
     if (firstError) {
       setError(firstError.message);
       setLoading(false);
       return;
     }
-
     setFixtures((fixturesResponse.data ?? []) as unknown as Fixture[]);
     setResults((resultsResponse.data ?? []) as unknown as Result[]);
     setLeagues((leaguesResponse.data ?? []) as League[]);
@@ -249,9 +221,7 @@ function Index() {
     setPlayerCount(playersResponse.count ?? 0);
     setLoading(false);
   }
-
   const now = Date.now();
-
   const upcomingFixtures = useMemo(
     () =>
       fixtures
@@ -268,9 +238,7 @@ function Index() {
         ),
     [fixtures, now],
   );
-
   const featuredMatch = upcomingFixtures[0] ?? null;
-
   const selectedDateFixtures = useMemo(() => {
     const offset =
       selectedDay === "yesterday"
@@ -278,7 +246,6 @@ function Index() {
         : selectedDay === "tomorrow"
           ? 1
           : 0;
-
     return fixtures
       .filter((fixture) => isSameCalendarDay(fixture.kickoff_at, offset))
       .sort(
@@ -287,9 +254,7 @@ function Index() {
           new Date(b.kickoff_at ?? 0).getTime(),
       );
   }, [fixtures, selectedDay]);
-
   const liveFixtures = fixtures.filter((fixture) => isLive(fixture));
-
   const recentResults = results
     .filter((result) => result.fixture)
     .sort(
@@ -298,7 +263,6 @@ function Index() {
         new Date(a.completed_at ?? 0).getTime(),
     )
     .slice(0, 5);
-
   return (
     <div className="min-h-screen bg-background text-foreground">
       <div className="flex min-h-screen">
@@ -306,10 +270,8 @@ function Index() {
           mobileOpen={mobileOpen}
           onClose={() => setMobileOpen(false)}
         />
-
         <div className="min-w-0 flex-1">
           <NovaHeader onMenu={() => setMobileOpen(true)} />
-
           <main
             id="main"
             className="mx-auto max-w-[1500px] px-5 pb-16 pt-6 lg:px-10"
@@ -319,65 +281,54 @@ function Index() {
                 {error}
               </div>
             )}
-
             <FeaturedMatch
               fixture={featuredMatch}
               liveFixtures={liveFixtures}
             />
-
             <section className="mb-7">
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">
                 VRFS / Match Centre
               </p>
-
               <h1 className="mt-2 text-3xl font-black tracking-tight sm:text-4xl">
                 Match Centre
               </h1>
-
               <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
                 Fixtures, results and live action from across the VRFS
                 competitive scene.
               </p>
             </section>
-
             <section className="mb-8 grid grid-cols-2 border-y border-border md:grid-cols-4">
               <Stat
                 icon={Trophy}
                 label="Active leagues"
                 value={leagues.length}
               />
-
               <Stat
                 icon={CalendarDays}
                 label="Fixtures tracked"
                 value={fixtures.length}
               />
-
               <Stat
                 icon={Users}
                 label="Registered teams"
                 value={teamCount}
               />
-
               <Stat
                 icon={ShieldCheck}
                 label="Players indexed"
                 value={playerCount}
               />
             </section>
-
             <section className="mb-10">
               <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                     Matchday
                   </p>
-
                   <h2 className="mt-1 text-2xl font-bold tracking-tight">
                     Fixtures & results
                   </h2>
                 </div>
-
                 <Link
                   to={"/fixtures" as any}
                   className="text-xs font-semibold text-muted-foreground transition hover:text-foreground"
@@ -386,7 +337,6 @@ function Index() {
                   <ChevronRight className="ml-1 inline size-3" />
                 </Link>
               </div>
-
               <div className="mb-6 flex border-b border-border">
                 <DayButton
                   active={selectedDay === "yesterday"}
@@ -394,14 +344,12 @@ function Index() {
                 >
                   Yesterday
                 </DayButton>
-
                 <DayButton
                   active={selectedDay === "today"}
                   onClick={() => setSelectedDay("today")}
                 >
                   Today
                 </DayButton>
-
                 <DayButton
                   active={selectedDay === "tomorrow"}
                   onClick={() => setSelectedDay("tomorrow")}
@@ -409,7 +357,6 @@ function Index() {
                   Tomorrow
                 </DayButton>
               </div>
-
               {loading ? (
                 <LoadingRows />
               ) : selectedDateFixtures.length === 0 ? (
@@ -418,19 +365,16 @@ function Index() {
                 <FixtureGroups fixtures={selectedDateFixtures} />
               )}
             </section>
-
             <section className="mb-10">
               <div className="mb-5 flex items-center justify-between">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                     Finished
                   </p>
-
                   <h2 className="mt-1 text-2xl font-bold tracking-tight">
                     Recent results
                   </h2>
                 </div>
-
                 <Link
                   to={"/results" as any}
                   className="text-xs font-semibold text-muted-foreground transition hover:text-foreground"
@@ -439,7 +383,6 @@ function Index() {
                   <ChevronRight className="ml-1 inline size-3" />
                 </Link>
               </div>
-
               {recentResults.length === 0 ? (
                 <EmptyState text="No completed results yet." />
               ) : (
@@ -450,7 +393,6 @@ function Index() {
                 </div>
               )}
             </section>
-
             <div className="grid gap-10 lg:grid-cols-2">
               <section>
                 <div className="mb-5 flex items-center justify-between">
@@ -458,12 +400,10 @@ function Index() {
                     <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                       Competitions
                     </p>
-
                     <h2 className="mt-1 text-2xl font-bold tracking-tight">
                       Featured leagues
                     </h2>
                   </div>
-
                   <Link
                     to={"/leagues" as any}
                     className="text-xs font-semibold text-muted-foreground transition hover:text-foreground"
@@ -472,7 +412,6 @@ function Index() {
                     <ChevronRight className="ml-1 inline size-3" />
                   </Link>
                 </div>
-
                 {leagues.length === 0 ? (
                   <EmptyState text="No leagues created yet." />
                 ) : (
@@ -491,19 +430,16 @@ function Index() {
                   </div>
                 )}
               </section>
-
               <section>
                 <div className="mb-5 flex items-center justify-between">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                       Market
                     </p>
-
                     <h2 className="mt-1 text-2xl font-bold tracking-tight">
                       Recent transfers
                     </h2>
                   </div>
-
                   <Link
                     to={"/transfers" as any}
                     className="text-xs font-semibold text-muted-foreground transition hover:text-foreground"
@@ -512,7 +448,6 @@ function Index() {
                     <ChevronRight className="ml-1 inline size-3" />
                   </Link>
                 </div>
-
                 {transfers.length === 0 ? (
                   <EmptyState text="No transfers yet." />
                 ) : (
@@ -524,12 +459,16 @@ function Index() {
                             transfer.player?.username ??
                             "Unknown player"}
                         </p>
-
                         <p className="mt-1 text-xs text-muted-foreground">
                           {transfer.from_team?.name ?? "Free agent"}
                           <span className="mx-2">→</span>
                           {transfer.to_team?.name ?? "Unknown team"}
                         </p>
+                        {transfer.details && (
+                          <p className="mt-1 text-xs text-muted-foreground/70">
+                            {transfer.details}
+                          </p>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -542,7 +481,6 @@ function Index() {
     </div>
   );
 }
-
 function FeaturedMatch({
   fixture,
   liveFixtures,
@@ -550,72 +488,60 @@ function FeaturedMatch({
   fixture: Fixture | null;
   liveFixtures: Fixture[];
 }) {
+  const liveMatch = liveFixtures[0];
+  const match = liveMatch ?? fixture;
   const [timeLeft, setTimeLeft] = useState(
-    fixture?.kickoff_at
-      ? getTimeLeft(new Date(fixture.kickoff_at).getTime())
+    match?.kickoff_at
+      ? getTimeLeft(new Date(match.kickoff_at).getTime())
       : 0,
   );
-
   useEffect(() => {
-    if (!fixture?.kickoff_at) {
+    if (!match?.kickoff_at || isLive(match) || isCompleted(match)) {
       setTimeLeft(0);
       return;
     }
-
     const update = () => {
-      setTimeLeft(getTimeLeft(new Date(fixture.kickoff_at!).getTime()));
+      setTimeLeft(getTimeLeft(new Date(match.kickoff_at!).getTime()));
     };
-
     update();
-
     const timer = window.setInterval(update, 1000);
-
     return () => window.clearInterval(timer);
-  }, [fixture?.id, fixture?.kickoff_at]);
-
-  const liveMatch = liveFixtures[0];
-
-  if (!fixture && !liveMatch) {
+  }, [match?.id, match?.kickoff_at]);
+  if (!match) {
     return (
       <section className="mb-12 border-y border-border py-16 text-center">
         <p className="text-xs font-bold uppercase tracking-[0.25em] text-muted-foreground">
           Match Centre
         </p>
-
         <h2 className="mt-3 text-3xl font-black tracking-tight">
           No upcoming match
         </h2>
-
         <p className="mt-2 text-sm text-muted-foreground">
-          NOVA will automatically feature the next scheduled fixture here.
+          The next scheduled fixture will appear here automatically.
         </p>
       </section>
     );
   }
-
-  const match = liveMatch ?? fixture!;
-  const isOngoing = Boolean(liveMatch);
-
+  const ongoing = isLive(match);
+  const completed = isCompleted(match);
   return (
     <section className="relative -mx-5 mb-12 overflow-hidden sm:-mx-8 lg:-mx-10">
       {match.matchday_graphic_url ? (
         <div className="group relative overflow-hidden">
           <img
             src={match.matchday_graphic_url}
-            alt={`${match.home_team?.name ?? "Home"} vs ${
-              match.away_team?.name ?? "Away"
+            alt={`${match.home_team?.name ?? ""} vs ${
+              match.away_team?.name ?? ""
             }`}
             className="block h-auto w-full object-contain transition-transform duration-700 ease-out group-hover:scale-[1.015]"
           />
-
           <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[55%] bg-gradient-to-t from-background via-background/80 to-transparent" />
         </div>
       ) : (
-        <div className="h-[300px] bg-muted/20 sm:h-[420px]" />
+        <div className="h-[220px] border-y border-border bg-muted/10 sm:h-[320px]" />
       )}
-
       <div className="relative -mt-20 px-5 sm:-mt-28 sm:px-8 lg:-mt-36 lg:px-10">
-        {isOngoing ? (
+        {ongoing ? (
           <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-black uppercase tracking-[0.2em] text-red-500">
             <span className="size-2 animate-pulse rounded-full bg-red-500" />
             Ongoing
@@ -625,47 +551,49 @@ function FeaturedMatch({
             Match Centre
           </p>
         )}
-
         <div className="flex flex-wrap items-center gap-3 sm:gap-5">
-          <TeamBadge team={match.home_team} />
-
-          <h2 className="text-2xl font-black uppercase tracking-[-0.05em] sm:text-4xl lg:text-5xl">
-            {match.home_team?.name ?? "Home"}
-          </h2>
-
-          {isOngoing || isCompleted(match) ? (
+          {match.home_team && (
+            <>
+              <TeamBadge team={match.home_team} />
+              <h2 className="text-2xl font-black uppercase tracking-[-0.05em] sm:text-4xl lg:text-5xl">
+                {match.home_team.name}
+              </h2>
+            </>
+          )}
+          {(ongoing || completed) && (
             <span className="text-2xl font-black sm:text-4xl">
               {match.home_score ?? 0} - {match.away_score ?? 0}
             </span>
-          ) : (
+          )}
+          {!ongoing && !completed && (
             <span className="text-sm font-bold text-muted-foreground sm:text-lg">
               VS
             </span>
           )}
-
-          <h2 className="text-2xl font-black uppercase tracking-[-0.05em] sm:text-4xl lg:text-5xl">
-            {match.away_team?.name ?? "Away"}
-          </h2>
-
-          <TeamBadge team={match.away_team} />
+          {match.away_team && (
+            <>
+              <h2 className="text-2xl font-black uppercase tracking-[-0.05em] sm:text-4xl lg:text-5xl">
+                {match.away_team.name}
+              </h2>
+              <TeamBadge team={match.away_team} />
+            </>
+          )}
         </div>
-
-        <p className="mt-4 text-sm font-bold uppercase tracking-[0.18em]">
-          {match.competition ?? "VRFS MATCH"}
-        </p>
-
+        {match.competition && (
+          <p className="mt-4 text-sm font-bold uppercase tracking-[0.18em]">
+            {match.competition}
+          </p>
+        )}
         {match.kickoff_at && (
           <p className="mt-2 text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
             {formatKickoff(match.kickoff_at)}
           </p>
         )}
-
-        {!isOngoing && !isCompleted(match) && (
+        {!ongoing && !completed && (
           <div className="mt-5">
             <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-muted-foreground">
               Kickoff countdown
             </p>
-
             <p className="mt-1 text-3xl font-black tracking-tight sm:text-4xl">
               {formatTimeLeft(timeLeft)}
             </p>
@@ -675,20 +603,15 @@ function FeaturedMatch({
     </section>
   );
 }
-
 function FixtureGroups({ fixtures }: { fixtures: Fixture[] }) {
   const groups = new Map<string, Fixture[]>();
-
   for (const fixture of fixtures) {
-    const league = fixture.competition ?? "Other competitions";
-
+    const league = fixture.competition?.trim() || "Other competitions";
     if (!groups.has(league)) {
       groups.set(league, []);
     }
-
     groups.get(league)!.push(fixture);
   }
-
   return (
     <div className="space-y-8">
       {[...groups.entries()].map(([league, leagueFixtures]) => (
@@ -697,7 +620,6 @@ function FixtureGroups({ fixtures }: { fixtures: Fixture[] }) {
             <Trophy className="size-4 text-muted-foreground" />
             <h3 className="text-sm font-bold">{league}</h3>
           </div>
-
           <div className="divide-y divide-border border-y border-border">
             {leagueFixtures.map((fixture) => (
               <FixtureRow key={fixture.id} fixture={fixture} />
@@ -708,28 +630,27 @@ function FixtureGroups({ fixtures }: { fixtures: Fixture[] }) {
     </div>
   );
 }
-
 function FixtureRow({ fixture }: { fixture: Fixture }) {
   const ongoing = isLive(fixture);
   const completed = isCompleted(fixture);
-
   return (
     <div className="flex items-center justify-between gap-4 py-4">
       <div className="flex min-w-0 flex-1 items-center justify-end gap-3 text-right">
-        <span className="truncate text-sm font-semibold">
-          {fixture.home_team?.name ?? "Home"}
-        </span>
-
-        <TeamBadge team={fixture.home_team} small />
+        {fixture.home_team && (
+          <>
+            <span className="truncate text-sm font-semibold">
+              {fixture.home_team.name}
+            </span>
+            <TeamBadge team={fixture.home_team} small />
+          </>
+        )}
       </div>
-
       <div className="min-w-[72px] text-center">
         {ongoing && (
-          <p className="mb-1 text-[9px] font-black uppercase tracking-[0.18em] text-red-500">
+          <p className="mb-1 animate-pulse text-[9px] font-black uppercase tracking-[0.18em] text-red-500">
             Ongoing
           </p>
         )}
-
         {completed ? (
           <span className="text-sm font-black">
             {fixture.home_score ?? 0} - {fixture.away_score ?? 0}
@@ -745,56 +666,59 @@ function FixtureRow({ fixture }: { fixture: Fixture }) {
           </span>
         )}
       </div>
-
       <div className="flex min-w-0 flex-1 items-center gap-3">
-        <TeamBadge team={fixture.away_team} small />
-
-        <span className="truncate text-sm font-semibold">
-          {fixture.away_team?.name ?? "Away"}
-        </span>
+        {fixture.away_team && (
+          <>
+            <TeamBadge team={fixture.away_team} small />
+            <span className="truncate text-sm font-semibold">
+              {fixture.away_team.name}
+            </span>
+          </>
+        )}
       </div>
     </div>
   );
 }
-
 function ResultRow({ result }: { result: Result }) {
   const fixture = result.fixture;
-
   if (!fixture) return null;
-
   return (
     <div className="flex items-center justify-between gap-4 py-4">
       <div className="flex min-w-0 flex-1 items-center justify-end gap-3 text-right">
-        <span className="truncate text-sm font-semibold">
-          {fixture.home_team?.name ?? "Home"}
-        </span>
-
-        <TeamBadge team={fixture.home_team} small />
+        {fixture.home_team && (
+          <>
+            <span className="truncate text-sm font-semibold">
+              {fixture.home_team.name}
+            </span>
+            <TeamBadge team={fixture.home_team} small />
+          </>
+        )}
       </div>
-
       <div className="text-sm font-black">
         {result.home_score} - {result.away_score}
       </div>
-
       <div className="flex min-w-0 flex-1 items-center gap-3">
-        <TeamBadge team={fixture.away_team} small />
-
-        <span className="truncate text-sm font-semibold">
-          {fixture.away_team?.name ?? "Away"}
-        </span>
+        {fixture.away_team && (
+          <>
+            <TeamBadge team={fixture.away_team} small />
+            <span className="truncate text-sm font-semibold">
+              {fixture.away_team.name}
+            </span>
+          </>
+        )}
       </div>
     </div>
   );
 }
-
 function TeamBadge({
   team,
   small = false,
 }: {
-  team: Fixture["home_team"];
+  team: Team | null;
   small?: boolean;
 }) {
-  if (!team?.logo_url) {
+  if (!team) return null;
+  if (!team.logo_url) {
     return (
       <div
         className={`shrink-0 rounded-full border border-border bg-muted/30 ${
@@ -803,7 +727,6 @@ function TeamBadge({
       />
     );
   }
-
   return (
     <img
       src={team.logo_url}
@@ -814,7 +737,6 @@ function TeamBadge({
     />
   );
 }
-
 function Stat({
   icon: Icon,
   label,
@@ -827,14 +749,11 @@ function Stat({
   return (
     <div className="px-4 py-5 sm:px-5">
       <Icon className="mb-3 size-4 text-muted-foreground" />
-
       <p className="text-2xl font-bold">{value}</p>
-
       <p className="mt-1 text-xs text-muted-foreground">{label}</p>
     </div>
   );
 }
-
 function DayButton({
   active,
   children,
@@ -858,7 +777,6 @@ function DayButton({
     </button>
   );
 }
-
 function EmptyState({ text }: { text: string }) {
   return (
     <div className="border-y border-border py-12 text-center">
@@ -866,7 +784,6 @@ function EmptyState({ text }: { text: string }) {
     </div>
   );
 }
-
 function LoadingRows() {
   return (
     <div className="divide-y divide-border border-y border-border">
@@ -880,10 +797,8 @@ function LoadingRows() {
     </div>
   );
 }
-
 function isCompleted(fixture: Fixture) {
   const status = (fixture.status ?? "").toLowerCase();
-
   return (
     status === "completed" ||
     status === "finished" ||
@@ -892,10 +807,8 @@ function isCompleted(fixture: Fixture) {
     (fixture.home_score !== null && fixture.away_score !== null)
   );
 }
-
 function isLive(fixture: Fixture) {
   const status = (fixture.status ?? "").toLowerCase();
-
   return (
     status === "live" ||
     status === "ongoing" ||
@@ -903,38 +816,30 @@ function isLive(fixture: Fixture) {
     status === "in-progress"
   );
 }
-
 function isSameCalendarDay(
   dateString: string | null,
   offset: number,
 ): boolean {
   if (!dateString) return false;
-
   const target = new Date();
   target.setHours(0, 0, 0, 0);
   target.setDate(target.getDate() + offset);
-
   const date = new Date(dateString);
-
   return (
     date.getFullYear() === target.getFullYear() &&
     date.getMonth() === target.getMonth() &&
     date.getDate() === target.getDate()
   );
 }
-
 function getTimeLeft(target: number) {
   return Math.max(0, target - Date.now());
 }
-
 function formatTimeLeft(ms: number) {
   const totalSeconds = Math.floor(ms / 1000);
-
   const days = Math.floor(totalSeconds / 86400);
   const hours = Math.floor((totalSeconds % 86400) / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
-
   if (days > 0) {
     return `${String(days).padStart(2, "0")}:${String(hours).padStart(
       2,
@@ -944,13 +849,11 @@ function formatTimeLeft(ms: number) {
       "0",
     )}`;
   }
-
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(
     2,
     "0",
   )}:${String(seconds).padStart(2, "0")}`;
 }
-
 function formatKickoff(dateString: string) {
   return new Date(dateString).toLocaleString([], {
     weekday: "short",
