@@ -160,7 +160,11 @@ function hasConfiguredRole(
     return false;
   }
 
-  return member.roles.cache.has(roleId);
+  if ("cache" in member.roles) {
+    return member.roles.cache.has(roleId);
+  }
+
+  return member.roles.includes(roleId);
 }
 
 /* =========================
