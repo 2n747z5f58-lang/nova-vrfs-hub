@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { ArrowLeft, Calendar, Trophy, Users } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { FavouriteButton } from "@/components/nova/FavouriteButton";
 
 type Team = {
   id: string;
@@ -196,38 +197,45 @@ function TeamDetail() {
 
         <section className="overflow-hidden rounded-xl border bg-card">
           <div className="p-6 md:p-8">
-            <div className="flex flex-col gap-6 sm:flex-row sm:items-center">
-              <div className="grid size-24 shrink-0 place-items-center overflow-hidden rounded-xl border bg-muted">
-                {team.logo_url ? (
-                  <img
-                    src={team.logo_url}
-                    alt={team.name}
-                    className="size-full object-contain p-3"
-                  />
-                ) : (
-                  <span className="text-3xl font-bold text-muted-foreground">
-                    {team.name.slice(0, 1).toUpperCase()}
-                  </span>
-                )}
+            <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-5">
+                <div className="grid size-24 shrink-0 place-items-center overflow-hidden rounded-xl border bg-muted">
+                  {team.logo_url ? (
+                    <img
+                      src={team.logo_url}
+                      alt={team.name}
+                      className="size-full object-contain p-3"
+                    />
+                  ) : (
+                    <span className="text-3xl font-bold text-muted-foreground">
+                      {team.name.slice(0, 1).toUpperCase()}
+                    </span>
+                  )}
+                </div>
+
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                    Team profile
+                  </p>
+
+                  <h1 className="mt-2 text-4xl font-bold tracking-tight">
+                    {team.name}
+                  </h1>
+
+                  <p className="mt-3 text-sm text-muted-foreground">
+                    {players.length} player
+                    {players.length === 1 ? "" : "s"} registered
+                    {" • "}
+                    {fixtures.length} fixture
+                    {fixtures.length === 1 ? "" : "s"}
+                  </p>
+                </div>
               </div>
 
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                  Team profile
-                </p>
-
-                <h1 className="mt-2 text-4xl font-bold tracking-tight">
-                  {team.name}
-                </h1>
-
-                <p className="mt-3 text-sm text-muted-foreground">
-                  {players.length} player
-                  {players.length === 1 ? "" : "s"} registered
-                  {" • "}
-                  {fixtures.length} fixture
-                  {fixtures.length === 1 ? "" : "s"}
-                </p>
-              </div>
+              <FavouriteButton
+                itemType="team"
+                itemId={team.id}
+              />
             </div>
           </div>
         </section>
