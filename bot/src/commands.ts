@@ -7,16 +7,20 @@ import {
   Message,
 } from "discord.js";
 import { supabase } from "./database.js";
+
 const token = process.env.DISCORD_BOT_TOKEN;
 const clientId = process.env.DISCORD_CLIENT_ID;
+
 if (!token || !clientId) {
   throw new Error(
     "DISCORD_BOT_TOKEN and DISCORD_CLIENT_ID are required.",
   );
 }
+
 /* =========================
    COMMAND HANDLER
 ========================= */
+
 export async function handleCommand(
   interaction: ChatInputCommandInteraction,
 ) {
@@ -48,9 +52,11 @@ export async function handleCommand(
       });
   }
 }
+
 /* =========================
    PERMISSIONS
 ========================= */
+
 function isAdmin(
   interaction: ChatInputCommandInteraction,
 ) {
@@ -58,9 +64,11 @@ function isAdmin(
     PermissionFlagsBits.Administrator,
   );
 }
+
 /* =========================
    SETUP
 ========================= */
+
 async function setup(
   interaction: ChatInputCommandInteraction,
 ) {
@@ -71,17 +79,49 @@ async function setup(
       ephemeral: true,
     });
   }
+
   await interaction.deferReply({ ephemeral: true });
+
   const guildId = interaction.guildId;
+
   if (!guildId) {
     return interaction.editReply(
       "❌ `/setup` can only be used inside a server.",
     );
   }
+
   const leagueName = interaction.options.getString(
     "league",
     true,
   );
+
+  /* =========================
+     FIND LINKED NOVA PROFILE
+  ========================= */
+
+  const {
+    data: profile,
+    error: profileError,
+  } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("discord_id", interaction.user.id)
+    .maybeSingle();
+
+  if (profileError) {
+    console.error(profileError);
+
+    return interaction.editReply(
+      "❌ Couldn't find your NOVA account.",
+    );
+  }
+
+  if (!profile) {
+    return interaction.editReply(
+      "❌ You need to link your Discord account to NOVA before running `/setup`.",
+    );
+  }
+
   const divisionNames = [
     interaction.options.getString("division1", true),
     interaction.options.getString("division2"),
@@ -89,11 +129,13 @@ async function setup(
   ].filter(
     (value): value is string => Boolean(value),
   );
+
   const slug = leagueName
     .toLowerCase()
     .trim()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+
   const {
     data: existingGuild,
     error: guildCheckError,
@@ -102,17 +144,21 @@ async function setup(
     .select("guild_id")
     .eq("guild_id", guildId)
     .maybeSingle();
+
   if (guildCheckError) {
     console.error(guildCheckError);
+
     return interaction.editReply(
       "❌ Couldn't check the server connection.",
     );
   }
+
   if (existingGuild) {
     return interaction.editReply(
       "⚠️ This Discord server is already connected to NOVA.",
     );
   }
+
   const {
     data: existingLeague,
     error: leagueCheckError,
@@ -121,17 +167,21 @@ async function setup(
     .select("id")
     .or(`name.ilike.${leagueName},slug.eq.${slug}`)
     .maybeSingle();
+
   if (leagueCheckError) {
     console.error(leagueCheckError);
+
     return interaction.editReply(
       "❌ Couldn't check whether that league already exists.",
     );
   }
+
   if (existingLeague) {
     return interaction.editReply(
       `❌ A league named **${leagueName}** already exists.`,
     );
   }
+
   const {
     data: league,
     error: leagueError,
@@ -144,12 +194,15 @@ async function setup(
     })
     .select()
     .single();
+
   if (leagueError || !league) {
     console.error(leagueError);
+
     return interaction.editReply(
       "❌ Couldn't create the league.",
     );
   }
+
   const {
     error: guildError,
   } = await supabase
@@ -160,16 +213,56 @@ async function setup(
       league_id: league.id,
       updated_by_discord_id: interaction.user.id,
     });
+
   if (guildError) {
     console.error(guildError);
+
     await supabase
       .from("leagues")
       .delete()
       .eq("id", league.id);
+
     return interaction.editReply(
       "❌ League created, but the Discord server couldn't be connected.",
     );
   }
+
+  /* =========================
+     ASSIGN PRIMARY OVERSEER
+  ========================= */
+
+  const {
+    error: memberError,
+  } = await supabase
+    .from("league_members")
+    .insert({
+      league_id: league.id,
+      user_id: profile.id,
+      role: "overseer",
+    });
+
+  if (memberError) {
+    console.error(memberError);
+
+    await supabase
+      .from("guild_settings")
+      .delete()
+      .eq("guild_id", guildId);
+
+    await supabase
+      .from("leagues")
+      .delete()
+      .eq("id", league.id);
+
+    return interaction.editReply(
+      "❌ The league was created, but your Overseer account couldn't be assigned.",
+    );
+  }
+
+  /* =========================
+     CREATE DIVISIONS
+  ========================= */
+
   for (let i = 0; i < divisionNames.length; i++) {
     const { error } = await supabase
       .from("divisions")
@@ -180,6 +273,7 @@ async function setup(
         status: "setup",
         gameweek_interval_days: 3,
       });
+
     if (error) {
       console.error(
         `Division ${i + 1} creation error:`,
@@ -187,6 +281,7 @@ async function setup(
       );
     }
   }
+
   return interaction.editReply(
     `✅ **${leagueName}** has been created.\n\n` +
       divisionNames
@@ -198,9 +293,11 @@ async function setup(
       `\n\n👑 You are now the primary Overseer.\n🌐 Manage the rest through NOVA.`,
   );
 }
+
 /* =========================
    ADD TEAM
 ========================= */
+
 async function addTeam(
   interaction: ChatInputCommandInteraction,
 ) {
@@ -211,22 +308,29 @@ async function addTeam(
       ephemeral: true,
     });
   }
+
   await interaction.deferReply({ ephemeral: true });
+
   const guildId = interaction.guildId;
+
   if (!guildId) {
     return interaction.editReply(
       "❌ Use `/addteam` inside a server.",
     );
   }
+
   const teamRole =
     interaction.options.getRole("team", true);
+
   const divisionName =
     interaction.options.getString(
       "division",
       true,
     );
+
   const logo =
     interaction.options.getAttachment("logo");
+
   const {
     data: settings,
     error: settingsError,
@@ -235,12 +339,15 @@ async function addTeam(
     .select("league_id")
     .eq("guild_id", guildId)
     .maybeSingle();
+
   if (settingsError || !settings?.league_id) {
     console.error(settingsError);
+
     return interaction.editReply(
       "❌ This server isn't connected to a league.",
     );
   }
+
   const {
     data: division,
     error: divisionError,
@@ -250,23 +357,29 @@ async function addTeam(
     .eq("league_id", settings.league_id)
     .ilike("name", divisionName)
     .maybeSingle();
+
   if (divisionError) {
     console.error(divisionError);
+
     return interaction.editReply(
       "❌ Couldn't find that division.",
     );
   }
+
   if (!division) {
     return interaction.editReply(
       `❌ Division **${divisionName}** doesn't exist.`,
     );
   }
+
   const teamName = teamRole.name;
+
   const teamSlug = teamName
     .toLowerCase()
     .trim()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+
   const {
     data: existingTeam,
     error: existingTeamError,
@@ -278,17 +391,21 @@ async function addTeam(
       `name.ilike.${teamName},slug.eq.${teamSlug},discord_role_id.eq.${teamRole.id}`,
     )
     .maybeSingle();
+
   if (existingTeamError) {
     console.error(existingTeamError);
+
     return interaction.editReply(
       "❌ Couldn't check whether that team already exists.",
     );
   }
+
   if (existingTeam) {
     return interaction.editReply(
       `❌ **${teamName}** is already registered in this league.`,
     );
   }
+
   const { error: teamError } =
     await supabase
       .from("teams")
@@ -301,21 +418,26 @@ async function addTeam(
         budget: 0,
         discord_role_id: teamRole.id,
       });
+
   if (teamError) {
     console.error(teamError);
+
     return interaction.editReply(
       "❌ Couldn't create the team.",
     );
   }
+
   return interaction.editReply(
     `✅ **${teamName}** has been added to **${divisionName}**!\n\n` +
       `🎭 Discord role: <@&${teamRole.id}>` +
       (logo ? "\n🖼️ Logo saved." : ""),
   );
 }
+
 /* =========================
    MAKE DIVISION
 ========================= */
+
 async function makeDivision(
   interaction: ChatInputCommandInteraction,
 ) {
@@ -326,30 +448,38 @@ async function makeDivision(
       ephemeral: true,
     });
   }
+
   await interaction.deferReply({ ephemeral: true });
+
   const guildId = interaction.guildId;
+
   if (!guildId) {
     return interaction.editReply(
       "❌ Use this inside a server.",
     );
   }
+
   const name = interaction.options.getString(
     "division",
     true,
   );
+
   const tier =
     interaction.options.getInteger("tier") ?? 1;
+
   const { data: settings } =
     await supabase
       .from("guild_settings")
       .select("league_id")
       .eq("guild_id", guildId)
       .maybeSingle();
+
   if (!settings?.league_id) {
     return interaction.editReply(
       "❌ This server isn't connected to a league.",
     );
   }
+
   const { data: existing } =
     await supabase
       .from("divisions")
@@ -357,11 +487,13 @@ async function makeDivision(
       .eq("league_id", settings.league_id)
       .ilike("name", name)
       .maybeSingle();
+
   if (existing) {
     return interaction.editReply(
       `❌ Division **${name}** already exists.`,
     );
   }
+
   const { error } =
     await supabase
       .from("divisions")
@@ -372,19 +504,24 @@ async function makeDivision(
         status: "setup",
         gameweek_interval_days: 3,
       });
+
   if (error) {
     console.error(error);
+
     return interaction.editReply(
       "❌ Couldn't create the division.",
     );
   }
+
   return interaction.editReply(
     `✅ **${name}** has been created as Tier ${tier}.`,
   );
 }
+
 /* =========================
    START DIVISION
 ========================= */
+
 async function startDivision(
   interaction: ChatInputCommandInteraction,
 ) {
@@ -395,28 +532,35 @@ async function startDivision(
       ephemeral: true,
     });
   }
+
   await interaction.deferReply({ ephemeral: true });
+
   const guildId = interaction.guildId;
+
   if (!guildId) {
     return interaction.editReply(
       "❌ Use this inside a server.",
     );
   }
+
   const name = interaction.options.getString(
     "division",
     true,
   );
+
   const { data: settings } =
     await supabase
       .from("guild_settings")
       .select("league_id")
       .eq("guild_id", guildId)
       .maybeSingle();
+
   if (!settings?.league_id) {
     return interaction.editReply(
       "❌ This server isn't connected to a league.",
     );
   }
+
   const { data: division } =
     await supabase
       .from("divisions")
@@ -424,11 +568,13 @@ async function startDivision(
       .eq("league_id", settings.league_id)
       .ilike("name", name)
       .maybeSingle();
+
   if (!division) {
     return interaction.editReply(
       `❌ Division **${name}** doesn't exist.`,
     );
   }
+
   const { error } =
     await supabase
       .from("divisions")
@@ -438,19 +584,24 @@ async function startDivision(
         ended_at: null,
       })
       .eq("id", division.id);
+
   if (error) {
     console.error(error);
+
     return interaction.editReply(
       "❌ Couldn't start the division.",
     );
   }
+
   return interaction.editReply(
     `🟢 **${name}** has officially started!`,
   );
 }
+
 /* =========================
    END DIVISION
 ========================= */
+
 async function endDivision(
   interaction: ChatInputCommandInteraction,
 ) {
@@ -461,28 +612,35 @@ async function endDivision(
       ephemeral: true,
     });
   }
+
   await interaction.deferReply({ ephemeral: true });
+
   const guildId = interaction.guildId;
+
   if (!guildId) {
     return interaction.editReply(
       "❌ Use this inside a server.",
     );
   }
+
   const name = interaction.options.getString(
     "division",
     true,
   );
+
   const { data: settings } =
     await supabase
       .from("guild_settings")
       .select("league_id")
       .eq("guild_id", guildId)
       .maybeSingle();
+
   if (!settings?.league_id) {
     return interaction.editReply(
       "❌ This server isn't connected to a league.",
     );
   }
+
   const { data: division } =
     await supabase
       .from("divisions")
@@ -490,11 +648,13 @@ async function endDivision(
       .eq("league_id", settings.league_id)
       .ilike("name", name)
       .maybeSingle();
+
   if (!division) {
     return interaction.editReply(
       `❌ Division **${name}** doesn't exist.`,
     );
   }
+
   const { error } =
     await supabase
       .from("divisions")
@@ -503,19 +663,24 @@ async function endDivision(
         ended_at: new Date().toISOString(),
       })
       .eq("id", division.id);
+
   if (error) {
     console.error(error);
+
     return interaction.editReply(
       "❌ Couldn't end the division.",
     );
   }
+
   return interaction.editReply(
     `🔴 **${name}** has ended.`,
   );
 }
+
 /* =========================
    GENERATE FIXTURES
 ========================= */
+
 async function generateFixtures(
   interaction: ChatInputCommandInteraction,
 ) {
@@ -526,18 +691,23 @@ async function generateFixtures(
       ephemeral: true,
     });
   }
+
   await interaction.deferReply({ ephemeral: true });
+
   const guildId = interaction.guildId;
+
   if (!guildId) {
     return interaction.editReply(
       "❌ Use this inside a server.",
     );
   }
+
   const divisionName =
     interaction.options.getString(
       "division",
       true,
     );
+
   const {
     data: settings,
     error: settingsError,
@@ -546,12 +716,15 @@ async function generateFixtures(
     .select("league_id")
     .eq("guild_id", guildId)
     .maybeSingle();
+
   if (settingsError || !settings?.league_id) {
     console.error(settingsError);
+
     return interaction.editReply(
       "❌ This server isn't connected to a league.",
     );
   }
+
   const {
     data: division,
     error: divisionError,
@@ -563,22 +736,27 @@ async function generateFixtures(
     .eq("league_id", settings.league_id)
     .ilike("name", divisionName)
     .maybeSingle();
+
   if (divisionError) {
     console.error(divisionError);
+
     return interaction.editReply(
       "❌ Couldn't find that division.",
     );
   }
+
   if (!division) {
     return interaction.editReply(
       `❌ Division **${divisionName}** doesn't exist.`,
     );
   }
+
   if (division.status !== "active") {
     return interaction.editReply(
       `❌ Division **${division.name}** isn't active yet.\n\nUse \`/startdivision\` first.`,
     );
   }
+
   const {
     data: teams,
     error: teamsError,
@@ -587,17 +765,21 @@ async function generateFixtures(
     .select("id,name,division_id")
     .eq("division_id", division.id)
     .order("name");
+
   if (teamsError) {
     console.error(teamsError);
+
     return interaction.editReply(
       "❌ Couldn't load the teams.",
     );
   }
+
   if (!teams || teams.length < 2) {
     return interaction.editReply(
       "❌ You need at least 2 teams in the division.",
     );
   }
+
   const {
     data: existingFixtures,
     error: existingFixturesError,
@@ -606,12 +788,15 @@ async function generateFixtures(
     .select("id")
     .eq("division_id", division.id)
     .limit(1);
+
   if (existingFixturesError) {
     console.error(existingFixturesError);
+
     return interaction.editReply(
       "❌ Couldn't check existing fixtures.",
     );
   }
+
   if (
     existingFixtures &&
     existingFixtures.length > 0
@@ -620,7 +805,9 @@ async function generateFixtures(
       `⚠️ Fixtures already exist for **${division.name}**.`,
     );
   }
+
   let scheduleTeams = [...teams];
+
   if (scheduleTeams.length % 2 !== 0) {
     scheduleTeams.push({
       id: null,
@@ -628,48 +815,60 @@ async function generateFixtures(
       division_id: division.id,
     });
   }
+
   const totalTeams = scheduleTeams.length;
   const roundsPerLeg = totalTeams - 1;
   const matchesPerRound = totalTeams / 2;
+
   const rounds: {
     home: typeof scheduleTeams[number];
     away: typeof scheduleTeams[number];
   }[][] = [];
+
   let rotating = [...scheduleTeams];
+
   for (
     let round = 0;
     round < roundsPerLeg;
     round++
   ) {
     const matches: typeof rounds[number] = [];
+
     for (
       let i = 0;
       i < matchesPerRound;
       i++
     ) {
       const first = rotating[i];
+
       const second =
         rotating[totalTeams - 1 - i];
+
       if (
         first.id === null ||
         second.id === null
       ) {
         continue;
       }
+
       const home =
         round % 2 === 0
           ? first
           : second;
+
       const away =
         round % 2 === 0
           ? second
           : first;
+
       matches.push({
         home,
         away,
       });
     }
+
     rounds.push(matches);
+
     rotating = [
       rotating[0],
       rotating[totalTeams - 1],
@@ -679,12 +878,16 @@ async function generateFixtures(
       ),
     ];
   }
+
   const firstStart = division.start_date
     ? new Date(division.start_date)
     : new Date();
+
   const intervalDays =
     division.gameweek_interval_days || 3;
+
   let fixtureCount = 0;
+
   for (
     let roundIndex = 0;
     roundIndex < rounds.length * 2;
@@ -692,20 +895,25 @@ async function generateFixtures(
   ) {
     const firstLeg =
       roundIndex < rounds.length;
+
     const sourceRound =
       rounds[
         firstLeg
           ? roundIndex
           : roundIndex - rounds.length
       ];
+
     const gameweekNumber =
       roundIndex + 1;
+
     const gameweekStart =
       new Date(firstStart);
+
     gameweekStart.setDate(
       gameweekStart.getDate() +
         roundIndex * intervalDays,
     );
+
     const {
       data: gameweek,
       error: gameweekError,
@@ -719,15 +927,18 @@ async function generateFixtures(
       })
       .select()
       .single();
+
     if (gameweekError || !gameweek) {
       console.error(
         `Gameweek ${gameweekNumber} error:`,
         gameweekError,
       );
+
       return interaction.editReply(
         `❌ Couldn't create Gameweek ${gameweekNumber}.`,
       );
     }
+
     for (
       let matchIndex = 0;
       matchIndex < sourceRound.length;
@@ -735,18 +946,23 @@ async function generateFixtures(
     ) {
       const match =
         sourceRound[matchIndex];
+
       let homeTeam = match.home;
       let awayTeam = match.away;
+
       if (!firstLeg) {
         homeTeam = match.away;
         awayTeam = match.home;
       }
+
       const kickoff =
         new Date(gameweekStart);
+
       kickoff.setHours(
         kickoff.getHours() +
           matchIndex * 2,
       );
+
       const { error: fixtureError } =
         await supabase
           .from("fixtures")
@@ -763,18 +979,22 @@ async function generateFixtures(
             competition: "League",
             gameweek: gameweekNumber,
           });
+
       if (fixtureError) {
         console.error(
           "Fixture creation error:",
           fixtureError,
         );
+
         return interaction.editReply(
           "❌ Couldn't create a fixture.",
         );
       }
+
       fixtureCount++;
     }
   }
+
   return interaction.editReply(
     `✅ Fixtures generated for **${division.name}**!\n\n` +
       `📅 Gameweeks: **${rounds.length * 2}**\n` +
@@ -783,9 +1003,11 @@ async function generateFixtures(
       `🏠 Home & away fixtures have been created.`,
   );
 }
+
 /* =========================
    SUBMIT RESULT
 ========================= */
+
 async function submitResult(
   interaction: ChatInputCommandInteraction,
 ) {
@@ -796,15 +1018,19 @@ async function submitResult(
       ephemeral: true,
     });
   }
+
   await interaction.deferReply({
     ephemeral: true,
   });
+
   const guildId = interaction.guildId;
+
   if (!guildId) {
     return interaction.editReply(
       "❌ Use `/submitresult` inside a server.",
     );
   }
+
   /*
    * Discord does not expose the replied-to message
    * as interaction.message for slash commands.
@@ -812,13 +1038,17 @@ async function submitResult(
    * Instead, look through recent channel messages
    * and find the newest completed result message.
    */
+
   const channel = interaction.channel;
+
   if (!channel || !("messages" in channel)) {
     return interaction.editReply(
       "❌ I couldn't access this channel.",
     );
   }
+
   let recentMessages;
+
   try {
     recentMessages =
       await channel.messages.fetch({
@@ -829,10 +1059,12 @@ async function submitResult(
       "Recent message fetch error:",
       error,
     );
+
     return interaction.editReply(
       "❌ I couldn't read the recent messages.",
     );
   }
+
   const candidateMessages =
     [...recentMessages.values()]
       .filter(
@@ -846,35 +1078,42 @@ async function submitResult(
           b.createdTimestamp -
           a.createdTimestamp,
       );
+
   /*
    * Find the newest message that looks like
    * a NOVA completed result.
-   *
-   * Required:
-   * @HOME 2 - 0 @AWAY
-   * replay codes
    */
+
   let resultMessage: Message | null = null;
+
   for (const message of candidateMessages) {
     const content =
       message.content.trim();
+
     const scoreMatch = content.match(
       /<@&(\d+)>\s+(\d+)\s*-\s*(\d+)\s+<@&(\d+)>/i,
     );
+
     if (!scoreMatch) {
       continue;
     }
+
     const hasReplaySection =
       /^replay codes$/im.test(content);
+
     if (!hasReplaySection) {
       continue;
     }
+
     const hasFirstHalf =
       /^1ST HALF\s+\S+/im.test(content);
+
     const hasSecondHalf =
       /^2ND HALF\s+\S+/im.test(content);
+
     const hasExtraTime =
       /^EXTRA TIME\s+\S+/im.test(content);
+
     if (
       !hasFirstHalf ||
       !hasSecondHalf ||
@@ -882,9 +1121,11 @@ async function submitResult(
     ) {
       continue;
     }
+
     resultMessage = message;
     break;
   }
+
   if (!resultMessage) {
     return interaction.editReply(
       "❌ I couldn't find a completed result message nearby.\n\n" +
@@ -896,43 +1137,54 @@ async function submitResult(
         "`EXTRA TIME <code>`",
     );
   }
+
   const content =
     resultMessage.content.trim();
+
   const lines = content
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
+
   /*
    * FIND TEAMS FROM ROLE MENTIONS
    */
+
   const roleMentions =
     [...resultMessage.mentions.roles.values()];
+
   if (roleMentions.length < 2) {
     return interaction.editReply(
       "❌ The result message must mention both team roles.",
     );
   }
+
   /*
    * SCORE
-   *
-   * @HOME 0 - 0 @AWAY
    */
+
   const scoreMatch = content.match(
     /<@&(\d+)>\s+(\d+)\s*-\s*(\d+)\s+<@&(\d+)>/i,
   );
+
   if (!scoreMatch) {
     return interaction.editReply(
       "❌ I couldn't read the score.\n\nUse:\n`@HOME 0 - 0 @AWAY`",
     );
   }
+
   const homeRoleId =
     scoreMatch[1];
+
   const homeScore =
     Number(scoreMatch[2]);
+
   const awayScore =
     Number(scoreMatch[3]);
+
   const awayRoleId =
     scoreMatch[4];
+
   if (
     homeRoleId === awayRoleId
   ) {
@@ -940,9 +1192,11 @@ async function submitResult(
       "❌ The home and away teams can't be the same.",
     );
   }
+
   /*
    * SERVER → LEAGUE
    */
+
   const {
     data: settings,
     error: settingsError,
@@ -951,18 +1205,22 @@ async function submitResult(
     .select("league_id")
     .eq("guild_id", guildId)
     .maybeSingle();
+
   if (
     settingsError ||
     !settings?.league_id
   ) {
     console.error(settingsError);
+
     return interaction.editReply(
       "❌ This server isn't connected to a league.",
     );
   }
+
   /*
    * FIND TEAMS BY DISCORD ROLE
    */
+
   const {
     data: homeTeam,
     error: homeError,
@@ -974,6 +1232,7 @@ async function submitResult(
     .eq("league_id", settings.league_id)
     .eq("discord_role_id", homeRoleId)
     .maybeSingle();
+
   const {
     data: awayTeam,
     error: awayError,
@@ -985,28 +1244,34 @@ async function submitResult(
     .eq("league_id", settings.league_id)
     .eq("discord_role_id", awayRoleId)
     .maybeSingle();
+
   if (homeError || awayError) {
     console.error(
       homeError,
       awayError,
     );
+
     return interaction.editReply(
       "❌ Couldn't find the teams.",
     );
   }
+
   if (!homeTeam) {
     return interaction.editReply(
       `❌ The home Discord role <@&${homeRoleId}> isn't registered as a NOVA team.`,
     );
   }
+
   if (!awayTeam) {
     return interaction.editReply(
       `❌ The away Discord role <@&${awayRoleId}> isn't registered as a NOVA team.`,
     );
   }
+
   /*
    * SAME DIVISION
    */
+
   if (
     homeTeam.division_id !==
     awayTeam.division_id
@@ -1015,9 +1280,11 @@ async function submitResult(
       "❌ Those teams aren't in the same division.",
     );
   }
+
   /*
    * FIND FIXTURE
    */
+
   const {
     data: fixtures,
     error: fixtureError,
@@ -1035,47 +1302,45 @@ async function submitResult(
       ascending: true,
     })
     .limit(1);
+
   if (fixtureError) {
     console.error(fixtureError);
+
     return interaction.editReply(
       "❌ Couldn't find the fixture.",
     );
   }
+
   const fixture =
     fixtures?.[0];
+
   if (!fixture) {
     return interaction.editReply(
       `❌ No scheduled fixture found for **${homeTeam.name} vs ${awayTeam.name}**.`,
     );
   }
+
   /*
    * PARSE PLAYER EVENTS
-   *
-   * Supported:
-   * ⚽️ Player
-   * 🅰️ Player
-   * 🧱 Player
-   * 🧤 Player
-   * 🌟 Player
-   *
-   * Team sections:
-   * @HOME
-   * @AWAY
    */
+
   const events: Array<{
     fixture_id: string;
     player_id: string;
     team_id: string;
     event_type: string;
   }> = [];
+
   let currentTeamId:
     | string
     | null = null;
+
   let section:
     | "ga"
     | "cleansheet"
     | "replays"
     | null = null;
+
   for (
     let i = 1;
     i < lines.length;
@@ -1083,8 +1348,10 @@ async function submitResult(
   ) {
     const line =
       lines[i];
+
     const lower =
       line.toLowerCase();
+
     if (
       lower === "cleansheet"
     ) {
@@ -1092,6 +1359,7 @@ async function submitResult(
       currentTeamId = null;
       continue;
     }
+
     if (
       lower === "replay codes"
     ) {
@@ -1099,19 +1367,24 @@ async function submitResult(
       currentTeamId = null;
       continue;
     }
+
     if (
       section === "replays"
     ) {
       continue;
     }
+
     /*
      * Team role heading
      */
+
     const roleMatch =
       line.match(/^<@&(\d+)>$/);
+
     if (roleMatch) {
       const roleId =
         roleMatch[1];
+
       if (
         roleId === homeRoleId
       ) {
@@ -1120,6 +1393,7 @@ async function submitResult(
         section = "ga";
         continue;
       }
+
       if (
         roleId === awayRoleId
       ) {
@@ -1129,20 +1403,27 @@ async function submitResult(
         continue;
       }
     }
+
     /*
      * PLAYER EVENTS
      */
+
     const isGoal =
       line.includes("⚽️") ||
       line.includes("⚽");
+
     const isAssist =
       line.includes("🅰️");
+
     const isDefCS =
       line.includes("🧱");
+
     const isGKCS =
       line.includes("🧤");
+
     const isMOTM =
       line.includes("🌟");
+
     if (
       !isGoal &&
       !isAssist &&
@@ -1152,11 +1433,13 @@ async function submitResult(
     ) {
       continue;
     }
+
     if (!currentTeamId) {
       return interaction.editReply(
         `❌ Couldn't determine which team **${line}** belongs to.`,
       );
     }
+
     const playerName =
       line
         .replace("⚽️", "")
@@ -1166,16 +1449,20 @@ async function submitResult(
         .replace("🧤", "")
         .replace("🌟", "")
         .trim();
+
     if (!playerName) {
       continue;
     }
+
     /*
      * FIND PLAYER
      */
+
     const discordMention =
       playerName.match(
         /^<@!?(\d+)>$/,
       );
+
     let player:
       | {
           id: string;
@@ -1185,6 +1472,7 @@ async function submitResult(
           discord_id: string | null;
         }
       | null = null;
+
     if (discordMention) {
       const {
         data,
@@ -1199,12 +1487,15 @@ async function submitResult(
           discordMention[1],
         )
         .maybeSingle();
+
       if (error) {
         console.error(error);
+
         return interaction.editReply(
           "❌ Couldn't look up that player.",
         );
       }
+
       player = data;
     } else {
       const {
@@ -1219,19 +1510,24 @@ async function submitResult(
           `username.ilike.${playerName},display_name.ilike.${playerName}`,
         )
         .maybeSingle();
+
       if (error) {
         console.error(error);
+
         return interaction.editReply(
           "❌ Couldn't look up that player.",
         );
       }
+
       player = data;
     }
+
     if (!player) {
       return interaction.editReply(
         `❌ Couldn't find player **${playerName}**.`,
       );
     }
+
     if (
       player.team_id &&
       player.team_id !==
@@ -1241,15 +1537,18 @@ async function submitResult(
         `❌ **${playerName}** isn't registered to the team they're listed under.`,
       );
     }
+
     /*
      * EVENT TYPE
      */
+
     let eventType:
       | "goal"
       | "assist"
       | "clean_sheet"
       | "clean_sheet_keeper"
       | "motm";
+
     if (isGoal) {
       eventType = "goal";
     } else if (isAssist) {
@@ -1262,6 +1561,7 @@ async function submitResult(
     } else {
       eventType = "motm";
     }
+
     events.push({
       fixture_id: fixture.id,
       player_id: player.id,
@@ -1269,27 +1569,32 @@ async function submitResult(
       event_type: eventType,
     });
   }
+
   /*
    * SCORE VALIDATION
    */
+
   const goalEvents =
     events.filter(
       (event) =>
         event.event_type ===
         "goal",
     );
+
   const homeGoals =
     goalEvents.filter(
       (event) =>
         event.team_id ===
         homeTeam.id,
     ).length;
+
   const awayGoals =
     goalEvents.filter(
       (event) =>
         event.team_id ===
         awayTeam.id,
     ).length;
+
   if (
     homeGoals !== homeScore ||
     awayGoals !== awayScore
@@ -1300,18 +1605,23 @@ async function submitResult(
         `But I found **${homeGoals}** ${homeTeam.name} goals and **${awayGoals}** ${awayTeam.name} goals.`,
     );
   }
+
   /*
    * REPLAY CODES
    */
+
   let replay1stHalf:
     | string
     | null = null;
+
   let replay2ndHalf:
     | string
     | null = null;
+
   let replayExtraTime:
     | string
     | null = null;
+
   for (const line of lines) {
     if (
       /^1ST HALF\s+/i.test(line)
@@ -1324,6 +1634,7 @@ async function submitResult(
           )
           .trim();
     }
+
     if (
       /^2ND HALF\s+/i.test(line)
     ) {
@@ -1335,6 +1646,7 @@ async function submitResult(
           )
           .trim();
     }
+
     if (
       /^EXTRA TIME\s+/i.test(line)
     ) {
@@ -1347,6 +1659,7 @@ async function submitResult(
           .trim();
     }
   }
+
   if (
     !replay1stHalf ||
     !replay2ndHalf ||
@@ -1359,9 +1672,11 @@ async function submitResult(
         "`EXTRA TIME <code>`",
     );
   }
+
   /*
    * SAVE FIXTURE
    */
+
   const {
     error: updateError,
   } = await supabase
@@ -1375,18 +1690,22 @@ async function submitResult(
       "id",
       fixture.id,
     );
+
   if (updateError) {
     console.error(
       "Fixture update error:",
       updateError,
     );
+
     return interaction.editReply(
       "❌ Couldn't save the result.",
     );
   }
+
   /*
    * SAVE RESULT ROW
    */
+
   const {
     error: resultError,
   } = await supabase
@@ -1405,11 +1724,13 @@ async function submitResult(
       recorded_at:
         new Date().toISOString(),
     });
+
   if (resultError) {
     console.error(
       "Result insert error:",
       resultError,
     );
+
     await supabase
       .from("fixtures")
       .update({
@@ -1421,24 +1742,29 @@ async function submitResult(
         "id",
         fixture.id,
       );
+
     return interaction.editReply(
       "❌ Couldn't save the result.",
     );
   }
+
   /*
    * SAVE MATCH EVENTS
    */
+
   if (events.length > 0) {
     const {
       error: eventsError,
     } = await supabase
       .from("match_events")
       .insert(events);
+
     if (eventsError) {
       console.error(
         "Match event error:",
         eventsError,
       );
+
       await supabase
         .from("fixtures")
         .update({
@@ -1450,6 +1776,7 @@ async function submitResult(
           "id",
           fixture.id,
         );
+
       await supabase
         .from("results")
         .delete()
@@ -1457,14 +1784,17 @@ async function submitResult(
           "fixture_id",
           fixture.id,
         );
+
       return interaction.editReply(
         "❌ Result couldn't be saved because the player events failed.",
       );
     }
   }
+
   /*
    * SUCCESS
    */
+
   return interaction.editReply(
     `✅ **${homeTeam.name} ${homeScore} - ${awayScore} ${awayTeam.name}** submitted!\n\n` +
       `📅 Gameweek: **${fixture.gameweek ?? "N/A"}**\n` +
@@ -1500,9 +1830,11 @@ async function submitResult(
       `🎥 Replay codes: **3/3**`,
   );
 }
+
 /* =========================
    SIMPLE COMMANDS
 ========================= */
+
 async function simple(
   interaction: ChatInputCommandInteraction,
   command: string,
@@ -1513,9 +1845,11 @@ async function simple(
     ephemeral: true,
   });
 }
+
 /* =========================
    SLASH COMMANDS
 ========================= */
+
 const commands = [
   new SlashCommandBuilder()
     .setName("setup")
@@ -1546,6 +1880,7 @@ const commands = [
         .setDescription("Division 3")
         .setRequired(false),
     ),
+
   new SlashCommandBuilder()
     .setName("addteam")
     .setDescription(
@@ -1571,6 +1906,7 @@ const commands = [
         .setDescription("Team logo")
         .setRequired(false),
     ),
+
   new SlashCommandBuilder()
     .setName("makedivision")
     .setDescription(
@@ -1589,6 +1925,7 @@ const commands = [
         .setMinValue(1)
         .setRequired(false),
     ),
+
   new SlashCommandBuilder()
     .setName("startdivision")
     .setDescription(
@@ -1600,6 +1937,7 @@ const commands = [
         .setDescription("Division name")
         .setRequired(true),
     ),
+
   new SlashCommandBuilder()
     .setName("enddivision")
     .setDescription(
@@ -1611,6 +1949,7 @@ const commands = [
         .setDescription("Division name")
         .setRequired(true),
     ),
+
   new SlashCommandBuilder()
     .setName("generatefixtures")
     .setDescription(
@@ -1622,21 +1961,25 @@ const commands = [
         .setDescription("Division name")
         .setRequired(true),
     ),
+
   new SlashCommandBuilder()
     .setName("submitresult")
     .setDescription(
       "Submit the latest completed result message",
     ),
+
   new SlashCommandBuilder()
     .setName("setcooverseer")
     .setDescription(
       "Add a Co-Overseer",
     ),
+
   new SlashCommandBuilder()
     .setName("removeoverseer")
     .setDescription(
       "Remove a Co-Overseer",
     ),
+
   new SlashCommandBuilder()
     .setName("transferleague")
     .setDescription(
@@ -1651,16 +1994,20 @@ const commands = [
 ].map((command) =>
   command.toJSON(),
 );
+
 /* =========================
    REGISTER COMMANDS
 ========================= */
+
 const rest = new REST({
   version: "10",
 }).setToken(token);
+
 try {
   console.log(
     "Registering NOVA slash commands globally...",
   );
+
   await rest.put(
     Routes.applicationCommands(
       clientId,
@@ -1669,6 +2016,7 @@ try {
       body: commands,
     },
   );
+
   console.log(
     "✅ NOVA slash commands registered successfully.",
   );
@@ -1677,5 +2025,6 @@ try {
     "❌ Failed to register NOVA slash commands:",
     error,
   );
+
   process.exit(1);
 }
