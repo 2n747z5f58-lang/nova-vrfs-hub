@@ -2,6 +2,8 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { ArrowLeft, Award, Calendar, Shield, Trophy } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { FavouriteButton } from "@/components/nova/FavouriteButton";
+
 type Player = {
   id: string;
   name: string;
@@ -14,6 +16,7 @@ type Player = {
     logo_url: string | null;
   } | null;
 };
+
 type MatchEvent = {
   id: string;
   fixture_id: string;
@@ -33,20 +36,25 @@ type MatchEvent = {
     } | null;
   } | null;
 };
+
 export const Route = createFileRoute("/players/$playerId")({
   ssr: false,
   component: PlayerDetail,
 });
+
 function PlayerDetail() {
   const { playerId } = Route.useParams();
+
   const [player, setPlayer] = useState<Player | null>(null);
   const [events, setEvents] = useState<MatchEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
   useEffect(() => {
     async function loadPlayer() {
       setLoading(true);
       setError("");
+
       const { data: playerData, error: playerError } = await supabase
         .from("players")
         .select(`
@@ -63,18 +71,22 @@ function PlayerDetail() {
         `)
         .eq("id", playerId)
         .maybeSingle();
+
       if (playerError) {
         console.error("Failed to load player:", playerError);
         setError("Couldn't load this player.");
         setLoading(false);
         return;
       }
+
       if (!playerData) {
         setError("Player not found.");
         setLoading(false);
         return;
       }
+
       setPlayer(playerData as Player);
+
       const { data: eventData, error: eventError } = await supabase
         .from("match_events")
         .select(`
@@ -98,28 +110,37 @@ function PlayerDetail() {
         `)
         .eq("player_id", playerId)
         .order("created_at", { ascending: false });
+
       if (eventError) {
         console.error("Failed to load player events:", eventError);
-        setError("Player loaded, but their match history couldn't be loaded.");
+        setError(
+          "Player loaded, but their match history couldn't be loaded.",
+        );
         setLoading(false);
         return;
       }
+
       setEvents((eventData ?? []) as MatchEvent[]);
       setLoading(false);
     }
+
     void loadPlayer();
   }, [playerId]);
+
   const goals = events.filter(
     (event) => event.event_type === "goal",
   ).length;
+
   const assists = events.filter(
     (event) => event.event_type === "assist",
   ).length;
+
   const motm = events.filter(
     (event) =>
       event.event_type === "motm" ||
       event.event_type === "man_of_the_match",
   ).length;
+
   const fixtures = Array.from(
     new Map(
       events
@@ -127,14 +148,17 @@ function PlayerDetail() {
         .map((event) => [event.fixture_id, event.fixture]),
     ).values(),
   );
+
   function formatDate(date: string | null) {
     if (!date) return "Unknown date";
+
     return new Date(date).toLocaleDateString([], {
       day: "numeric",
       month: "short",
       year: "numeric",
     });
   }
+
   if (loading) {
     return (
       <main className="min-h-screen bg-background px-4 py-8 md:px-8">
@@ -146,15 +170,18 @@ function PlayerDetail() {
       </main>
     );
   }
+
   if (!player) {
     return (
       <main className="min-h-screen bg-background px-4 py-8 md:px-8">
         <div className="mx-auto flex min-h-[60vh] max-w-5xl items-center justify-center text-center">
           <div>
             <h1 className="text-2xl font-bold">Player not found</h1>
+
             <p className="mt-2 text-sm text-muted-foreground">
               {error || "This player does not exist in NOVA."}
             </p>
+
             <Link
               to="/players"
               className="mt-5 inline-block text-sm font-medium underline"
@@ -166,6 +193,7 @@ function PlayerDetail() {
       </main>
     );
   }
+
   return (
     <main className="min-h-screen bg-background px-4 py-8 text-foreground md:px-8">
       <div className="mx-auto max-w-5xl">
@@ -176,50 +204,64 @@ function PlayerDetail() {
           <ArrowLeft className="size-4" />
           Back to players
         </Link>
+
         <section className="overflow-hidden rounded-xl border bg-card">
           <div className="p-6 md:p-8">
-            <div className="flex flex-col gap-6 sm:flex-row sm:items-center">
-              <div className="grid size-24 shrink-0 place-items-center overflow-hidden rounded-full border bg-muted">
-                {player.avatar_url ? (
-                  <img
-                    src={player.avatar_url}
-                    alt={player.name}
-                    className="size-full object-cover"
-                  />
-                ) : (
-                  <span className="text-3xl font-bold text-muted-foreground">
-                    {player.name.slice(0, 1).toUpperCase()}
-                  </span>
-                )}
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                  Player profile
-                </p>
-                <h1 className="mt-2 text-4xl font-bold tracking-tight">
-                  {player.name}
-                </h1>
-                <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-                  {player.position && (
-                    <span>{player.position}</span>
-                  )}
-                  {player.team && (
-                    <span className="flex items-center gap-2">
-                      {player.team.logo_url && (
-                        <img
-                          src={player.team.logo_url}
-                          alt=""
-                          className="size-5 object-contain"
-                        />
-                      )}
-                      {player.team.name}
+            <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-5">
+                <div className="grid size-24 shrink-0 place-items-center overflow-hidden rounded-full border bg-muted">
+                  {player.avatar_url ? (
+                    <img
+                      src={player.avatar_url}
+                      alt={player.name}
+                      className="size-full object-cover"
+                    />
+                  ) : (
+                    <span className="text-3xl font-bold text-muted-foreground">
+                      {player.name.slice(0, 1).toUpperCase()}
                     </span>
                   )}
                 </div>
+
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                    Player profile
+                  </p>
+
+                  <h1 className="mt-2 text-4xl font-bold tracking-tight">
+                    {player.name}
+                  </h1>
+
+                  <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+                    {player.position && (
+                      <span>{player.position}</span>
+                    )}
+
+                    {player.team && (
+                      <span className="flex items-center gap-2">
+                        {player.team.logo_url && (
+                          <img
+                            src={player.team.logo_url}
+                            alt=""
+                            className="size-5 object-contain"
+                          />
+                        )}
+
+                        {player.team.name}
+                      </span>
+                    )}
+                  </div>
+                </div>
               </div>
+
+              <FavouriteButton
+                itemType="player"
+                itemId={player.id}
+              />
             </div>
           </div>
         </section>
+
         <section className="mt-6 grid gap-3 sm:grid-cols-4">
           <div className="rounded-xl border bg-card p-5">
             <div className="flex items-center gap-3">
@@ -228,10 +270,12 @@ function PlayerDetail() {
                 Appearances
               </span>
             </div>
+
             <p className="mt-4 text-3xl font-bold">
               {fixtures.length}
             </p>
           </div>
+
           <div className="rounded-xl border bg-card p-5">
             <div className="flex items-center gap-3">
               <Trophy className="size-4 text-muted-foreground" />
@@ -239,8 +283,10 @@ function PlayerDetail() {
                 Goals
               </span>
             </div>
+
             <p className="mt-4 text-3xl font-bold">{goals}</p>
           </div>
+
           <div className="rounded-xl border bg-card p-5">
             <div className="flex items-center gap-3">
               <Shield className="size-4 text-muted-foreground" />
@@ -248,8 +294,10 @@ function PlayerDetail() {
                 Assists
               </span>
             </div>
+
             <p className="mt-4 text-3xl font-bold">{assists}</p>
           </div>
+
           <div className="rounded-xl border bg-card p-5">
             <div className="flex items-center gap-3">
               <Award className="size-4 text-muted-foreground" />
@@ -257,21 +305,26 @@ function PlayerDetail() {
                 MOTM
               </span>
             </div>
+
             <p className="mt-4 text-3xl font-bold">{motm}</p>
           </div>
         </section>
+
         <section className="mt-8">
           <div className="mb-4">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
               Match history
             </p>
+
             <h2 className="mt-2 text-2xl font-bold">
               Recent appearances
             </h2>
           </div>
+
           {fixtures.length === 0 ? (
             <div className="rounded-xl border bg-card px-6 py-12 text-center">
               <h3 className="font-semibold">No match history yet</h3>
+
               <p className="mt-2 text-sm text-muted-foreground">
                 Match appearances and events will appear here once this player
                 has played.
@@ -292,15 +345,19 @@ function PlayerDetail() {
                         <span>
                           {fixture.home_team?.name ?? "Home team"}
                         </span>
+
                         <span className="text-muted-foreground">vs</span>
+
                         <span>
                           {fixture.away_team?.name ?? "Away team"}
                         </span>
                       </div>
+
                       <p className="mt-2 text-xs text-muted-foreground">
                         {formatDate(fixture.kickoff_at)}
                       </p>
                     </div>
+
                     <div className="text-right">
                       {fixture.home_score !== null &&
                       fixture.away_score !== null ? (
@@ -319,6 +376,7 @@ function PlayerDetail() {
             </div>
           )}
         </section>
+
         {error && (
           <p className="mt-6 text-sm text-muted-foreground">{error}</p>
         )}
