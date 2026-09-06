@@ -22,7 +22,6 @@ type Division = {
   id: string;
   league_id: string;
   name: string;
-  slug: string | null;
 };
 type Team = {
   id: string;
@@ -126,7 +125,7 @@ function LeaguePanel() {
       const [divisionResponse, teamResponse] = await Promise.all([
         supabase
           .from("divisions")
-          .select("id,league_id,name,slug")
+          .select("id,league_id,name")
           .eq("league_id", currentLeague.id)
           .order("name", { ascending: true }),
         supabase
@@ -151,8 +150,7 @@ function LeaguePanel() {
         setLoading(false);
         return;
       }
-      const divisionsList = (divisionResponse.data ??
-        []) as Division[];
+      const divisionsList = (divisionResponse.data ?? []) as Division[];
       const teamsList = (teamResponse.data ?? []) as Team[];
       setDivisions(divisionsList);
       setConfirmedTeams(teamsList);
@@ -403,9 +401,7 @@ function LeaguePanel() {
             </h1>
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <span className="rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide">
-                {memberRole === "overseer"
-                  ? "Overseer"
-                  : "Co-Overseer"}
+                {memberRole === "overseer" ? "Overseer" : "Co-Overseer"}
               </span>
               {league.status && (
                 <span className="rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -548,9 +544,7 @@ function LeaguePanel() {
                               />
                             ) : (
                               <div className="grid size-10 place-items-center rounded-lg border text-xs font-bold">
-                                {team.name
-                                  .slice(0, 2)
-                                  .toUpperCase()}
+                                {team.name.slice(0, 2).toUpperCase()}
                               </div>
                             )}
                             <div className="min-w-0 flex-1">
@@ -632,9 +626,7 @@ function LeaguePanel() {
                             />
                           ) : (
                             <div className="grid size-9 place-items-center rounded-lg border text-[10px] font-bold">
-                              {team.name
-                                .slice(0, 2)
-                                .toUpperCase()}
+                              {team.name.slice(0, 2).toUpperCase()}
                             </div>
                           )}
                           <div className="min-w-0 flex-1">
@@ -665,9 +657,7 @@ function LeaguePanel() {
                       />
                     ) : (
                       <div className="grid size-11 place-items-center rounded-lg border text-xs font-bold">
-                        {selectedTeam.name
-                          .slice(0, 2)
-                          .toUpperCase()}
+                        {selectedTeam.name.slice(0, 2).toUpperCase()}
                       </div>
                     )}
                     <div className="min-w-0 flex-1">
@@ -775,9 +765,7 @@ function LeaguePanel() {
                               />
                             ) : (
                               <div className="grid size-9 place-items-center rounded-lg border text-[10px] font-bold">
-                                {team.name
-                                  .slice(0, 2)
-                                  .toUpperCase()}
+                                {team.name.slice(0, 2).toUpperCase()}
                               </div>
                             )}
                             <div className="min-w-0">
