@@ -4,7 +4,7 @@ import {
   Client,
   TextChannel,
 } from "discord.js";
-import sharp from "sharp";
+import { Resvg } from "@resvg/resvg-js";
 import { supabase } from "./database.js";
 type Division = {
   id: string;
@@ -73,9 +73,7 @@ function truncate(value: string, max: number) {
   }
   return `${value.slice(0, max - 1)}…`;
 }
-function formatNumber(
-  value: number | null | undefined,
-) {
+function number(value: number | null | undefined) {
   return value ?? 0;
 }
 function sortRows(rows: TableRow[]) {
@@ -83,10 +81,7 @@ function sortRows(rows: TableRow[]) {
     if (b.points !== a.points) {
       return b.points - a.points;
     }
-    if (
-      b.goalDifference !==
-      a.goalDifference
-    ) {
+    if (b.goalDifference !== a.goalDifference) {
       return (
         b.goalDifference -
         a.goalDifference
@@ -101,7 +96,7 @@ function sortRows(rows: TableRow[]) {
   });
 }
 /* =========================
-   TEAM LOGOS
+   LOGOS
 ========================= */
 async function fetchLogoDataUri(
   url: string | null,
@@ -112,9 +107,10 @@ async function fetchLogoDataUri(
   try {
     const controller =
       new AbortController();
-    const timeout = setTimeout(() => {
-      controller.abort();
-    }, 8_000);
+    const timeout = setTimeout(
+      () => controller.abort(),
+      8_000,
+    );
     const response = await fetch(url, {
       signal: controller.signal,
     });
@@ -143,7 +139,7 @@ async function fetchLogoDataUri(
   }
 }
 /* =========================
-   DATA
+   DATABASE
 ========================= */
 async function getLeague(
   leagueId: string,
@@ -288,7 +284,9 @@ async function hasTablePost(
 ) {
   const { data, error } =
     await supabase
-      .from("gameweek_table_posts")
+      .from(
+        "gameweek_table_posts",
+      )
       .select("id")
       .eq(
         "division_id",
@@ -309,7 +307,7 @@ async function hasTablePost(
   return Boolean(data);
 }
 /* =========================
-   BUILD TABLE
+   TABLE DATA
 ========================= */
 function buildRows(
   teams: Team[],
@@ -333,48 +331,42 @@ function buildRows(
       return {
         position: 0,
         team,
-        played: formatNumber(
+        played: number(
           standing?.played,
         ),
-        won: formatNumber(
+        won: number(
           standing?.won,
         ),
-        drawn: formatNumber(
+        drawn: number(
           standing?.drawn,
         ),
-        lost: formatNumber(
+        lost: number(
           standing?.lost,
         ),
-        goalsFor:
-          formatNumber(
-            standing?.goals_for,
-          ),
-        goalsAgainst:
-          formatNumber(
-            standing?.goals_against,
-          ),
-        goalDifference:
-          formatNumber(
-            standing?.goal_difference,
-          ),
-        points: formatNumber(
+        goalsFor: number(
+          standing?.goals_for,
+        ),
+        goalsAgainst: number(
+          standing?.goals_against,
+        ),
+        goalDifference: number(
+          standing?.goal_difference,
+        ),
+        points: number(
           standing?.points,
         ),
       };
     },
   );
-  const sorted =
-    sortRows(rows);
-  return sorted.map(
+  return sortRows(rows).map(
     (row, index) => ({
       ...row,
-      position:
-        index + 1,
+      position: index + 1,
     }),
   );
 }
 /* =========================
-   GENERATE SVG
+   SVG
 ========================= */
 async function buildTableSvg(
   league: League,
@@ -395,18 +387,17 @@ async function buildTableSvg(
     );
   const logoMap =
     new Map(logoEntries);
+  const width = 1700;
   const rowHeight = 76;
   const headerHeight = 170;
   const columnHeaderHeight = 70;
   const footerHeight = 70;
-  const width = 1700;
   const height =
     headerHeight +
     columnHeaderHeight +
     rows.length *
       rowHeight +
     footerHeight;
-  const left = 80;
   const positionX = 80;
   const teamX = 170;
   const pX = 850;
@@ -421,7 +412,7 @@ async function buildTableSvg(
     gameweekNumber === 0
       ? "GW0 TABLE"
       : `GW${gameweekNumber} TABLE`;
-  const svgRows =
+  const rowsMarkup =
     rows
       .map(
         (
@@ -437,6 +428,19 @@ async function buildTableSvg(
             logoMap.get(
               row.team.id,
             );
+          const teamName =
+            escapeXml(
+              truncate(
+                row.team.name,
+                27,
+              ),
+            );
+          const goalDifference =
+            row.goalDifference > 0
+              ? `+${row.goalDifference}`
+              : String(
+                  row.goalDifference,
+                );
           const logoMarkup =
             logo
               ? `
@@ -458,7 +462,7 @@ async function buildTableSvg(
                 />
                 <text
                   x="${teamX + 24}"
-                  y="${y + 45}"
+                  y="${y + 44}"
                   text-anchor="middle"
                   font-family="DejaVu Sans"
                   font-size="16"
@@ -473,18 +477,6 @@ async function buildTableSvg(
                     .toUpperCase(),
                 )}</text>
               `;
-          const teamName =
-            escapeXml(
-              truncate(
-                row.team.name,
-                27,
-              ),
-            );
-          const gd =
-            row.goalDifference >
-            0
-              ? `+${row.goalDifference}`
-              : `${row.goalDifference}`;
           return `
             <rect
               x="40"
@@ -521,7 +513,6 @@ async function buildTableSvg(
               text-anchor="middle"
               font-family="DejaVu Sans"
               font-size="20"
-              font-weight="400"
               fill="#d4d4d8"
             >${row.played}</text>
             <text
@@ -530,7 +521,6 @@ async function buildTableSvg(
               text-anchor="middle"
               font-family="DejaVu Sans"
               font-size="20"
-              font-weight="400"
               fill="#d4d4d8"
             >${row.won}</text>
             <text
@@ -539,7 +529,6 @@ async function buildTableSvg(
               text-anchor="middle"
               font-family="DejaVu Sans"
               font-size="20"
-              font-weight="400"
               fill="#d4d4d8"
             >${row.drawn}</text>
             <text
@@ -548,7 +537,6 @@ async function buildTableSvg(
               text-anchor="middle"
               font-family="DejaVu Sans"
               font-size="20"
-              font-weight="400"
               fill="#d4d4d8"
             >${row.lost}</text>
             <text
@@ -557,7 +545,6 @@ async function buildTableSvg(
               text-anchor="middle"
               font-family="DejaVu Sans"
               font-size="20"
-              font-weight="400"
               fill="#d4d4d8"
             >${row.goalsFor}</text>
             <text
@@ -566,7 +553,6 @@ async function buildTableSvg(
               text-anchor="middle"
               font-family="DejaVu Sans"
               font-size="20"
-              font-weight="400"
               fill="#d4d4d8"
             >${row.goalsAgainst}</text>
             <text
@@ -577,7 +563,7 @@ async function buildTableSvg(
               font-size="20"
               font-weight="700"
               fill="#ffffff"
-            >${gd}</text>
+            >${goalDifference}</text>
             <text
               x="${ptsX}"
               y="${y + 46}"
@@ -603,7 +589,6 @@ async function buildTableSvg(
         height="${height}"
         fill="#050505"
       />
-      <!-- HEADER -->
       <rect
         x="40"
         y="30"
@@ -615,7 +600,7 @@ async function buildTableSvg(
         stroke-width="2"
       />
       <text
-        x="${left}"
+        x="80"
         y="83"
         font-family="DejaVu Sans"
         font-size="34"
@@ -623,7 +608,7 @@ async function buildTableSvg(
         fill="#ffffff"
       >NOVA</text>
       <text
-        x="${left}"
+        x="80"
         y="126"
         font-family="DejaVu Sans"
         font-size="25"
@@ -654,7 +639,6 @@ async function buildTableSvg(
       >${escapeXml(
         division.name,
       )}</text>
-      <!-- COLUMN HEADER -->
       <rect
         x="40"
         y="${headerHeight}"
@@ -664,7 +648,7 @@ async function buildTableSvg(
         fill="#18181b"
       />
       <text
-        x="${positionX}"
+        x="80"
         y="${headerHeight + 45}"
         font-family="DejaVu Sans"
         font-size="17"
@@ -679,83 +663,17 @@ async function buildTableSvg(
         font-weight="700"
         fill="#71717a"
       >TEAM</text>
+      <text x="${pX}" y="${headerHeight + 45}" text-anchor="middle" font-family="DejaVu Sans" font-size="17" font-weight="700" fill="#71717a">P</text>
+      <text x="${wX}" y="${headerHeight + 45}" text-anchor="middle" font-family="DejaVu Sans" font-size="17" font-weight="700" fill="#71717a">W</text>
+      <text x="${dX}" y="${headerHeight + 45}" text-anchor="middle" font-family="DejaVu Sans" font-size="17" font-weight="700" fill="#71717a">D</text>
+      <text x="${lX}" y="${headerHeight + 45}" text-anchor="middle" font-family="DejaVu Sans" font-size="17" font-weight="700" fill="#71717a">L</text>
+      <text x="${gfX}" y="${headerHeight + 45}" text-anchor="middle" font-family="DejaVu Sans" font-size="17" font-weight="700" fill="#71717a">GF</text>
+      <text x="${gaX}" y="${headerHeight + 45}" text-anchor="middle" font-family="DejaVu Sans" font-size="17" font-weight="700" fill="#71717a">GA</text>
+      <text x="${gdX}" y="${headerHeight + 45}" text-anchor="middle" font-family="DejaVu Sans" font-size="17" font-weight="700" fill="#71717a">GD</text>
+      <text x="${ptsX}" y="${headerHeight + 45}" text-anchor="middle" font-family="DejaVu Sans" font-size="17" font-weight="700" fill="#ffffff">PTS</text>
+      ${rowsMarkup}
       <text
-        x="${pX}"
-        y="${headerHeight + 45}"
-        text-anchor="middle"
-        font-family="DejaVu Sans"
-        font-size="17"
-        font-weight="700"
-        fill="#71717a"
-      >P</text>
-      <text
-        x="${wX}"
-        y="${headerHeight + 45}"
-        text-anchor="middle"
-        font-family="DejaVu Sans"
-        font-size="17"
-        font-weight="700"
-        fill="#71717a"
-      >W</text>
-      <text
-        x="${dX}"
-        y="${headerHeight + 45}"
-        text-anchor="middle"
-        font-family="DejaVu Sans"
-        font-size="17"
-        font-weight="700"
-        fill="#71717a"
-      >D</text>
-      <text
-        x="${lX}"
-        y="${headerHeight + 45}"
-        text-anchor="middle"
-        font-family="DejaVu Sans"
-        font-size="17"
-        font-weight="700"
-        fill="#71717a"
-      >L</text>
-      <text
-        x="${gfX}"
-        y="${headerHeight + 45}"
-        text-anchor="middle"
-        font-family="DejaVu Sans"
-        font-size="17"
-        font-weight="700"
-        fill="#71717a"
-      >GF</text>
-      <text
-        x="${gaX}"
-        y="${headerHeight + 45}"
-        text-anchor="middle"
-        font-family="DejaVu Sans"
-        font-size="17"
-        font-weight="700"
-        fill="#71717a"
-      >GA</text>
-      <text
-        x="${gdX}"
-        y="${headerHeight + 45}"
-        text-anchor="middle"
-        font-family="DejaVu Sans"
-        font-size="17"
-        font-weight="700"
-        fill="#71717a"
-      >GD</text>
-      <text
-        x="${ptsX}"
-        y="${headerHeight + 45}"
-        text-anchor="middle"
-        font-family="DejaVu Sans"
-        font-size="17"
-        font-weight="700"
-        fill="#ffffff"
-      >PTS</text>
-      <!-- TABLE ROWS -->
-      ${svgRows}
-      <!-- FOOTER -->
-      <text
-        x="${left}"
+        x="80"
         y="${height - 25}"
         font-family="DejaVu Sans"
         font-size="14"
@@ -777,7 +695,7 @@ async function buildTableSvg(
   `;
 }
 /* =========================
-   GENERATE PNG
+   RENDER PNG
 ========================= */
 async function generateTablePng(
   league: League,
@@ -792,11 +710,20 @@ async function generateTablePng(
       gameweekNumber,
       rows,
     );
-  return sharp(
-    Buffer.from(svg),
-  )
-    .png()
-    .toBuffer();
+  const renderer =
+    new Resvg(svg, {
+      fitTo: {
+        mode: "original",
+      },
+      font: {
+        loadSystemFonts: true,
+        defaultFontFamily:
+          "DejaVu Sans",
+      },
+    });
+  return renderer
+    .render()
+    .asPng();
 }
 /* =========================
    POST TABLE
@@ -905,7 +832,7 @@ async function postTable(
         name: filename,
       },
     );
-  const text =
+  const messageText =
     gameweekNumber === 0
       ? `GW0 TABLE - ${division.name}\nThe opening standings for ${league.name}.`
       : `GW${gameweekNumber} TABLE - ${division.name}\nThe standings have been updated after Gameweek ${gameweekNumber}.`;
@@ -915,7 +842,7 @@ async function postTable(
       await (
         channel as TextChannel
       ).send({
-        content: text,
+        content: messageText,
         files: [attachment],
       });
   } catch (error) {
@@ -953,7 +880,7 @@ async function postTable(
   );
 }
 /* =========================
-   CHECK GAMEWEEKS
+   CHECK DIVISION
 ========================= */
 async function checkDivision(
   client: Client,
@@ -965,10 +892,6 @@ async function checkDivision(
   ) {
     return;
   }
-  /*
-   * GW0 is posted once the
-   * division is active.
-   */
   await postTable(
     client,
     division,
@@ -996,22 +919,22 @@ async function checkDivision(
     const gameweek of
       gameweeks ?? []
   ) {
-    const number =
+    const gameweekNumber =
       Number(
         gameweek.number,
       );
     if (
       !Number.isInteger(
-        number,
+        gameweekNumber,
       ) ||
-      number < 1
+      gameweekNumber < 1
     ) {
       continue;
     }
     if (
       await hasTablePost(
         division.id,
-        number,
+        gameweekNumber,
       )
     ) {
       continue;
@@ -1019,7 +942,7 @@ async function checkDivision(
     const fixtures =
       await getFixtures(
         division.id,
-        number,
+        gameweekNumber,
       );
     if (
       fixtures.length ===
@@ -1041,12 +964,12 @@ async function checkDivision(
     await postTable(
       client,
       division,
-      number,
+      gameweekNumber,
     );
   }
 }
 /* =========================
-   MAIN CHECK
+   WATCHER
 ========================= */
 async function checkGameweekTables(
   client: Client,
@@ -1101,7 +1024,7 @@ async function checkGameweekTables(
   }
 }
 /* =========================
-   START WATCHER
+   START
 ========================= */
 export function startGameweekTableWatcher(
   client: Client,
