@@ -681,23 +681,17 @@ async function postTable(
     );
     return;
   }
-  let channel = guild.channels.cache.get(
-    tableChannelId,
-  );
-  if (!channel) {
-    try {
-      channel =
-        await guild.channels.fetch(
-          tableChannelId,
-        );
-    } catch (error) {
-      console.error(
-        `Failed to fetch table channel ${tableChannelId}:`,
-        error,
-      );
-      return;
-    }
-  }
+  /*
+   * Fetch the configured channel.
+   *
+   * We intentionally keep the fetched value separate
+   * because Discord.js can return null when a channel
+   * cannot be found.
+   */
+  const channel =
+    await guild.channels.fetch(
+      tableChannelId,
+    );
   if (
     !channel ||
     channel.type !== ChannelType.GuildText
@@ -787,25 +781,22 @@ async function checkDivision(
     return;
   }
   /*
-   * GW0
-   *
-   * The first table is posted as soon as
-   * the division is active and has teams.
+   * GW0 is posted once the division is active
+   * and teams exist.
    */
   await postTable(
     client,
     division,
     0,
   );
-  /*
-   * Find every generated gameweek.
-   */
-  const { data: gameweeks, error } =
-    await supabase
-      .from("gameweeks")
-      .select("number")
-      .eq("division_id", division.id)
-      .order("number");
+  const {
+    data: gameweeks,
+    error,
+  } = await supabase
+    .from("gameweeks")
+    .select("number")
+    .eq("division_id", division.id)
+    .order("number");
   if (error) {
     console.error(
       `Failed to load gameweeks for ${division.name}:`,
@@ -817,7 +808,10 @@ async function checkDivision(
     const number = Number(
       gameweek.number,
     );
-    if (!Number.isInteger(number) || number < 1) {
+    if (
+      !Number.isInteger(number) ||
+      number < 1
+    ) {
       continue;
     }
     if (
@@ -832,18 +826,12 @@ async function checkDivision(
       division.id,
       number,
     );
-    /*
-     * A gameweek cannot finish if it has
-     * no fixtures.
-     */
     if (fixtures.length === 0) {
       continue;
     }
     /*
-     * Every fixture must have both scores.
-     *
-     * This means postponed/unplayed games stop
-     * the table from being posted prematurely.
+     * Every fixture needs a home and away score
+     * before the gameweek is considered complete.
      */
     const complete = fixtures.every(
       (fixture) =>
@@ -871,14 +859,16 @@ async function checkGameweekTables(
   }
   watcherRunning = true;
   try {
-    const { data: divisions, error } =
-      await supabase
-        .from("divisions")
-        .select(
-          "id,league_id,name,status",
-        )
-        .eq("status", "active")
-        .order("tier");
+    const {
+      data: divisions,
+      error,
+    } = await supabase
+      .from("divisions")
+      .select(
+        "id,league_id,name,status",
+      )
+      .eq("status", "active")
+      .order("tier");
     if (error) {
       console.error(
         "Failed to load active divisions:",
