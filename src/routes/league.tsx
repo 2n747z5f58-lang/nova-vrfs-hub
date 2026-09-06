@@ -76,12 +76,28 @@ type ChannelSettings = {
   transfer_window_channel_id: string | null;
   announcements_channel_id: string | null;
 };
+type DiscordRoleOption = {
+  id: string;
+  name: string;
+  position?: number;
+  color?: string;
+  managed?: boolean;
+};
+type DiscordChannelOption = {
+  id: string;
+  name: string;
+  type: number;
+  position?: number;
+  parent_id?: string | null;
+};
 type GuildSettings = {
   guild_id: string;
   guild_name: string | null;
   league_id: string | null;
   manager_role_id: string | null;
   co_manager_role_id: string | null;
+  discord_roles?: DiscordRoleOption[] | null;
+  discord_channels?: DiscordChannelOption[] | null;
 };
 type Section =
   | "overview"
@@ -98,7 +114,9 @@ const TIER_OPTIONS = [
   { value: 3, label: "Tier 3" },
 ];
 function getTierLabel(tier: number | null | undefined) {
-  return TIER_OPTIONS.find((option) => option.value === tier)?.label ?? "Elite";
+  return (
+    TIER_OPTIONS.find((option) => option.value === tier)?.label ?? "Elite"
+  );
 }
 export const Route = createFileRoute("/league")({
   ssr: false,
@@ -143,9 +161,12 @@ function LeaguePanel() {
     transfer_window_channel_id: null,
     announcements_channel_id: null,
   });
-  const [guildSettings, setGuildSettings] = useState<GuildSettings | null>(
-    null,
-  );
+  const [guildSettings, setGuildSettings] =
+    useState<GuildSettings | null>(null);
+  const [discordRoles, setDiscordRoles] = useState<DiscordRoleOption[]>([]);
+  const [discordChannels, setDiscordChannels] = useState<
+    DiscordChannelOption[]
+  >([]);
   const [managerRoleId, setManagerRoleId] = useState("");
   const [coManagerRoleId, setCoManagerRoleId] = useState("");
   const [teamSearch, setTeamSearch] = useState("");
@@ -161,7 +182,8 @@ function LeaguePanel() {
     [],
   );
   const [searchingMembers, setSearchingMembers] = useState(false);
-  const [activeSection, setActiveSection] = useState<Section>("overview");
+  const [activeSection, setActiveSection] =
+    useState<Section>("overview");
   const canManageTiers = isNovaAdmin || isNovaOwner;
   useEffect(() => {
     void loadPanel();
@@ -200,11 +222,12 @@ function LeaguePanel() {
       }
       setIsNovaAdmin(admin);
       setIsNovaOwner(owner);
-      const { data: memberships, error: membershipError } = await supabase
-        .from("league_members")
-        .select("id,league_id,user_id,role")
-        .eq("user_id", user.id)
-        .in("role", ["overseer", "co_overseer"]);
+      const { data: memberships, error: membershipError } =
+        await supabase
+          .from("league_members")
+          .select("id,league_id,user_id,role")
+          .eq("user_id", user.id)
+          .in("role", ["overseer", "co_overseer"]);
       if (membershipError) {
         setError(
           `Couldn't check league permissions: ${membershipError.message}`,
@@ -230,11 +253,12 @@ function LeaguePanel() {
         }
         membership = firstLeagueMember as LeagueMember;
       }
-      const { data: leagueData, error: leagueError } = await supabase
-        .from("leagues")
-        .select("id,name,slug,status,logo_url,description,season")
-        .eq("id", membership.league_id)
-        .maybeSingle();
+      const { data: leagueData, error: leagueError } =
+        await supabase
+          .from("leagues")
+          .select("id,name,slug,status,logo_url,description,season")
+          .eq("id", membership.league_id)
+          .maybeSingle();
       if (leagueError) {
         setError(`Couldn't load your league: ${leagueError.message}`);
         return;
@@ -291,14 +315,16 @@ function LeaguePanel() {
         supabase
           .from("guild_settings")
           .select(
-            "guild_id,guild_name,league_id,manager_role_id,co_manager_role_id",
+            "guild_id,guild_name,league_id,manager_role_id,co_manager_role_id,discord_roles,discord_channels",
           )
           .eq("league_id", currentLeague.id)
           .limit(1)
           .maybeSingle(),
       ]);
       if (divisionResponse.error) {
-        setError(`Couldn't load divisions: ${divisionResponse.error.message}`);
+        setError(
+          `Couldn't load divisions: ${divisionResponse.error.message}`,
+        );
         return;
       }
       if (teamResponse.error) {
@@ -350,10 +376,22 @@ function LeaguePanel() {
         setGuildSettings(guild);
         setManagerRoleId(guild.manager_role_id ?? "");
         setCoManagerRoleId(guild.co_manager_role_id ?? "");
+        setDiscordRoles(
+          Array.isArray(guild.discord_roles)
+            ? guild.discord_roles
+            : [],
+        );
+        setDiscordChannels(
+          Array.isArray(guild.discord_channels)
+            ? guild.discord_channels
+            : [],
+        );
       } else {
         setGuildSettings(null);
         setManagerRoleId("");
         setCoManagerRoleId("");
+        setDiscordRoles([]);
+        setDiscordChannels([]);
       }
       const memberList = (membersResponse.data ?? []) as LeagueMember[];
       setMembers(memberList);
@@ -363,7 +401,9 @@ function LeaguePanel() {
       const memberIds = memberList
         .map((member) => member.user_id)
         .filter((id): id is string => Boolean(id));
-      const profileIds = [...new Set([...managerIds, ...memberIds])];
+      const profileIds = [
+        ...new Set([...managerIds, ...memberIds]),
+      ];
       if (profileIds.length > 0) {
         const { data: profileData } = await supabase
           .from("profiles")
@@ -400,8 +440,8 @@ function LeaguePanel() {
     setError(null);
     setSuccess(null);
     const payload = {
-      manager_role_id: managerRoleId.trim() || null,
-      co_manager_role_id: coManagerRoleId.trim() || null,
+      manager_role_id: managerRoleId || null,
+      co_manager_role_id: coManagerRoleId || null,
     };
     const { data, error: saveError } = await supabase
       .from("guild_settings")
@@ -409,7 +449,7 @@ function LeaguePanel() {
       .eq("guild_id", guildSettings.guild_id)
       .eq("league_id", league.id)
       .select(
-        "guild_id,guild_name,league_id,manager_role_id,co_manager_role_id",
+        "guild_id,guild_name,league_id,manager_role_id,co_manager_role_id,discord_roles,discord_channels",
       )
       .single();
     if (saveError) {
@@ -417,9 +457,10 @@ function LeaguePanel() {
       setSavingDiscordRoles(false);
       return;
     }
-    setGuildSettings(data as GuildSettings);
-    setManagerRoleId(data.manager_role_id ?? "");
-    setCoManagerRoleId(data.co_manager_role_id ?? "");
+    const updatedGuild = data as GuildSettings;
+    setGuildSettings(updatedGuild);
+    setManagerRoleId(updatedGuild.manager_role_id ?? "");
+    setCoManagerRoleId(updatedGuild.co_manager_role_id ?? "");
     setSavingDiscordRoles(false);
     setSuccess("Manager and Co-Manager Discord roles saved.");
   }
@@ -520,7 +561,6 @@ function LeaguePanel() {
     setCreatingDivision(true);
     setError(null);
     setSuccess(null);
-    let selectedTier = 1;
     const usedTiers = new Set(
       divisions
         .map((division) => division.tier ?? 1)
@@ -536,13 +576,12 @@ function LeaguePanel() {
       setCreatingDivision(false);
       return;
     }
-    selectedTier = nextAvailableTier.value;
     const { data, error: createError } = await supabase
       .from("divisions")
       .insert({
         league_id: league.id,
         name: newDivisionName.trim(),
-        tier: selectedTier,
+        tier: nextAvailableTier.value,
         season: league.season,
         status: "draft",
         gameweek_interval_days:
@@ -768,7 +807,9 @@ function LeaguePanel() {
   }
   async function removeCoOverseer(member: LeagueMember) {
     if (!league || member.role !== "co_overseer" || !member.id) return;
-    const profile = member.user_id ? profiles[member.user_id] : null;
+    const profile = member.user_id
+      ? profiles[member.user_id]
+      : null;
     const confirmed = window.confirm(
       `Remove ${profile?.display_name || profile?.username || "this Co-Overseer"}?`,
     );
@@ -805,20 +846,43 @@ function LeaguePanel() {
     }
     return grouped;
   }, [divisions, confirmedTeams]);
+  const selectableDiscordChannels = useMemo(() => {
+    return discordChannels
+      .filter((channel) =>
+        [0, 5, 15, 16].includes(channel.type),
+      )
+      .sort((a, b) => {
+        const parentCompare = String(a.parent_id ?? "").localeCompare(
+          String(b.parent_id ?? ""),
+        );
+        if (parentCompare !== 0) {
+          return parentCompare;
+        }
+        return (a.position ?? 0) - (b.position ?? 0);
+      });
+  }, [discordChannels]);
+  const selectableDiscordRoles = useMemo(() => {
+    return discordRoles
+      .filter((role) => !role.managed)
+      .sort((a, b) => (b.position ?? 0) - (a.position ?? 0));
+  }, [discordRoles]);
   function getManagerName(team: Team) {
     if (!team.manager_id) return "No manager";
     const profile = profiles[team.manager_id];
     if (!profile) return "Manager";
     return profile.display_name || profile.username || "Manager";
   }
-  function channelInput(
+  function discordChannelLabel(channel: DiscordChannelOption) {
+    return `#${channel.name}`;
+  }
+  function channelSelect(
     label: string,
     key: keyof Omit<ChannelSettings, "league_id">,
   ) {
     return (
       <div>
         <label className="text-sm font-semibold">{label}</label>
-        <input
+        <select
           value={channels[key] ?? ""}
           onChange={(event) =>
             setChannels((current) => ({
@@ -826,9 +890,42 @@ function LeaguePanel() {
               [key]: event.target.value || null,
             }))
           }
-          placeholder="Discord channel ID"
-          className="mt-2 w-full rounded-xl border bg-background px-3 py-2.5 text-sm outline-none transition focus:ring-2 focus:ring-primary/20"
-        />
+          className="mt-2 w-full rounded-xl border bg-background px-3 py-3 text-sm outline-none transition focus:ring-2 focus:ring-primary/20"
+        >
+          <option value="">Not configured</option>
+          {selectableDiscordChannels.map((channel) => (
+            <option key={channel.id} value={channel.id}>
+              {discordChannelLabel(channel)}
+            </option>
+          ))}
+        </select>
+      </div>
+    );
+  }
+  function roleSelect(
+    label: string,
+    value: string,
+    onChange: (value: string) => void,
+    description: string,
+  ) {
+    return (
+      <div>
+        <label className="text-sm font-semibold">{label}</label>
+        <select
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          className="mt-2 w-full rounded-xl border bg-background px-3 py-3 text-sm outline-none transition focus:ring-2 focus:ring-primary/20"
+        >
+          <option value="">Not configured</option>
+          {selectableDiscordRoles.map((role) => (
+            <option key={role.id} value={role.id}>
+              {role.name}
+            </option>
+          ))}
+        </select>
+        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+          {description}
+        </p>
       </div>
     );
   }
@@ -933,7 +1030,9 @@ function LeaguePanel() {
             </h1>
             <div className="mt-3 flex flex-wrap gap-2">
               <span className="rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide">
-                {memberRole === "overseer" ? "Overseer" : "Co-Overseer"}
+                {memberRole === "overseer"
+                  ? "Overseer"
+                  : "Co-Overseer"}
               </span>
               {league.status && (
                 <span className="rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -1084,8 +1183,8 @@ function LeaguePanel() {
                     Confirm a NOVA team
                   </h2>
                   <p className="mt-2 text-sm text-muted-foreground">
-                    Search for any team registered on NOVA, select it, choose
-                    its division, then confirm it into this league.
+                    Search for any team registered on NOVA, select it,
+                    choose its division, then confirm it into this league.
                   </p>
                   <div className="mt-5 grid gap-4 lg:grid-cols-[1fr_240px_auto]">
                     <div className="relative">
@@ -1151,7 +1250,8 @@ function LeaguePanel() {
                       <option value="">Select division</option>
                       {divisions.map((division) => (
                         <option key={division.id} value={division.id}>
-                          {division.name} • {getTierLabel(division.tier)}
+                          {division.name} •{" "}
+                          {getTierLabel(division.tier)}
                         </option>
                       ))}
                     </select>
@@ -1252,7 +1352,9 @@ function LeaguePanel() {
             {activeSection === "divisions" && (
               <div className="space-y-6">
                 <div className="rounded-2xl border bg-card p-6">
-                  <h2 className="text-xl font-bold">Create division</h2>
+                  <h2 className="text-xl font-bold">
+                    Create division
+                  </h2>
                   <p className="mt-2 text-sm text-muted-foreground">
                     Create a new division for this league. NOVA supports
                     three division levels: Elite, Tier 2 and Tier 3.
@@ -1292,7 +1394,9 @@ function LeaguePanel() {
                 <div className="rounded-2xl border bg-card p-6">
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                      <h2 className="text-xl font-bold">Divisions</h2>
+                      <h2 className="text-xl font-bold">
+                        Divisions
+                      </h2>
                       <p className="mt-1 text-sm text-muted-foreground">
                         {divisions.length} division
                         {divisions.length === 1 ? "" : "s"} configured.
@@ -1330,7 +1434,8 @@ function LeaguePanel() {
                               )}
                             </div>
                             <p className="mt-1 text-xs text-muted-foreground">
-                              {count} team{count === 1 ? "" : "s"} •{" "}
+                              {count} team
+                              {count === 1 ? "" : "s"} •{" "}
                               {division.status ?? "draft"}
                             </p>
                           </div>
@@ -1358,7 +1463,9 @@ function LeaguePanel() {
                               </select>
                             )}
                             <button
-                              onClick={() => void deleteDivision(division)}
+                              onClick={() =>
+                                void deleteDivision(division)
+                              }
                               className="inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold text-destructive transition hover:bg-destructive/10"
                             >
                               <Trash2 className="size-4" />
@@ -1514,8 +1621,8 @@ function LeaguePanel() {
                     <div>
                       <h2 className="font-bold">Transfer rules</h2>
                       <p className="text-sm text-muted-foreground">
-                        The underlying transfer, loan and release rules can
-                        be enforced by NOVA's transfer system.
+                        The underlying transfer, loan and release rules
+                        can be enforced by NOVA's transfer system.
                       </p>
                     </div>
                   </div>
@@ -1539,9 +1646,10 @@ function LeaguePanel() {
                         No Discord server connected
                       </p>
                       <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                        Run <strong>/setup</strong> in the Discord server for
-                        this league first. Once the server is connected, you
-                        can select the Manager and Co-Manager role IDs here.
+                        Run <strong>/setup</strong> in the Discord server
+                        for this league first. Once the server is
+                        connected, you can select the Manager and
+                        Co-Manager roles here.
                       </p>
                     </div>
                   ) : (
@@ -1551,149 +1659,170 @@ function LeaguePanel() {
                           Connected Discord server
                         </p>
                         <p className="mt-1 font-semibold">
-                          {guildSettings.guild_name || guildSettings.guild_id}
+                          {guildSettings.guild_name ||
+                            guildSettings.guild_id}
                         </p>
                         <p className="mt-1 text-xs text-muted-foreground">
-                          Guild ID: {guildSettings.guild_id}
+                          Discord roles and channels are synced
+                          automatically from this server.
                         </p>
                       </div>
-                      <div className="mt-5 grid gap-5 md:grid-cols-2">
-                        <div>
-                          <label className="text-sm font-semibold">
-                            Manager Role ID
-                          </label>
-                          <input
-                            value={managerRoleId}
-                            onChange={(event) =>
-                              setManagerRoleId(event.target.value)
-                            }
-                            placeholder="e.g. 123456789012345678"
-                            className="mt-2 w-full rounded-xl border bg-background px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/20"
-                          />
-                          <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                            Members with this Discord role can use NOVA
-                            manager commands for their club.
+                      {selectableDiscordRoles.length === 0 ? (
+                        <div className="mt-5 rounded-xl border border-dashed bg-background p-5">
+                          <p className="font-semibold">
+                            No Discord roles available yet
+                          </p>
+                          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                            NOVA has not received the server's Discord
+                            roles yet. Make sure the NOVA bot is in the
+                            server and deployed, then refresh this page.
                           </p>
                         </div>
-                        <div>
-                          <label className="text-sm font-semibold">
-                            Co-Manager Role ID
-                          </label>
-                          <input
-                            value={coManagerRoleId}
-                            onChange={(event) =>
-                              setCoManagerRoleId(event.target.value)
-                            }
-                            placeholder="e.g. 123456789012345678"
-                            className="mt-2 w-full rounded-xl border bg-background px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/20"
-                          />
-                          <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                            Members with this Discord role receive the same
-                            manager-level NOVA command access.
-                          </p>
-                        </div>
-                      </div>
-                      <div className="mt-5 rounded-xl border border-dashed bg-background p-4">
-                        <p className="text-sm font-semibold">
-                          Used by the NOVA transfer system
-                        </p>
-                        <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                          These roles will control access to commands such as
-                          /sign, /release, /transfer and /loan. The bot will
-                          also verify that the manager or co-manager belongs
-                          to the relevant club.
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => void saveDiscordRoles()}
-                        disabled={savingDiscordRoles}
-                        className="mt-5 inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50"
-                      >
-                        {savingDiscordRoles ? (
-                          <Loader2 className="size-4 animate-spin" />
-                        ) : (
-                          <Check className="size-4" />
-                        )}
-                        Save Staff Roles
-                      </button>
+                      ) : (
+                        <>
+                          <div className="mt-5 grid gap-5 md:grid-cols-2">
+                            {roleSelect(
+                              "Manager Role",
+                              managerRoleId,
+                              setManagerRoleId,
+                              "Members with this Discord role can use NOVA manager commands for their club.",
+                            )}
+                            {roleSelect(
+                              "Co-Manager Role",
+                              coManagerRoleId,
+                              setCoManagerRoleId,
+                              "Members with this Discord role receive the same manager-level NOVA command access.",
+                            )}
+                          </div>
+                          <div className="mt-5 rounded-xl border border-dashed bg-background p-4">
+                            <p className="text-sm font-semibold">
+                              Used by the NOVA transfer system
+                            </p>
+                            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                              These roles control access to commands such
+                              as /sign, /release, /transfer and /loan.
+                              The bot will also verify that the manager or
+                              co-manager belongs to the relevant club.
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => void saveDiscordRoles()}
+                            disabled={savingDiscordRoles}
+                            className="mt-5 inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+                          >
+                            {savingDiscordRoles ? (
+                              <Loader2 className="size-4 animate-spin" />
+                            ) : (
+                              <Check className="size-4" />
+                            )}
+                            Save Staff Roles
+                          </button>
+                        </>
+                      )}
                     </>
                   )}
                 </SettingsCard>
                 <SettingsCard
                   title="Discord channels"
-                  description="Channel IDs are stored here so NOVA knows where league messages belong."
+                  description="Choose where NOVA sends fixtures, results, transfers, announcements and other league messages."
                 >
-                  <div className="grid gap-5 md:grid-cols-2">
-                    {channelInput(
-                      "Fixtures Channel",
-                      "fixtures_channel_id",
-                    )}
-                    {channelInput(
-                      "Results Channel",
-                      "results_channel_id",
-                    )}
-                    {channelInput(
-                      "Table Channel",
-                      "table_channel_id",
-                    )}
-                    {channelInput(
-                      "Signings Channel",
-                      "signings_channel_id",
-                    )}
-                    {channelInput(
-                      "Releases Channel",
-                      "releases_channel_id",
-                    )}
-                    {channelInput(
-                      "Budgets Channel",
-                      "budgets_channel_id",
-                    )}
-                    {channelInput(
-                      "Transfers Channel",
-                      "transfers_channel_id",
-                    )}
-                    {channelInput(
-                      "Loans Channel",
-                      "loans_channel_id",
-                    )}
-                    {channelInput(
-                      "Transfer Window Channel",
-                      "transfer_window_channel_id",
-                    )}
-                    {channelInput(
-                      "Announcements Channel",
-                      "announcements_channel_id",
-                    )}
-                  </div>
-                  <div className="mt-5 rounded-xl border border-dashed bg-background p-4">
-                    <p className="text-sm font-semibold">
-                      Discord channel picker
-                    </p>
-                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                      These fields currently accept channel IDs. NOVA will
-                      later replace these with dropdowns populated from the
-                      connected Discord server.
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => void saveChannels()}
-                    disabled={saving}
-                    className="mt-5 inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50"
-                  >
-                    {saving && (
-                      <Loader2 className="size-4 animate-spin" />
-                    )}
-                    Save Discord Settings
-                  </button>
+                  {!guildSettings?.guild_id ? (
+                    <div className="rounded-xl border border-dashed bg-background p-5">
+                      <p className="font-semibold">
+                        No Discord server connected
+                      </p>
+                      <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                        Run <strong>/setup</strong> in the league's
+                        Discord server first.
+                      </p>
+                    </div>
+                  ) : selectableDiscordChannels.length === 0 ? (
+                    <div className="rounded-xl border border-dashed bg-background p-5">
+                      <p className="font-semibold">
+                        No Discord channels available yet
+                      </p>
+                      <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                        NOVA has not received the server's channels yet.
+                        Make sure the NOVA bot is in the server and
+                        deployed, then refresh this page.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="grid gap-5 md:grid-cols-2">
+                        {channelSelect(
+                          "Fixtures Channel",
+                          "fixtures_channel_id",
+                        )}
+                        {channelSelect(
+                          "Results Channel",
+                          "results_channel_id",
+                        )}
+                        {channelSelect(
+                          "Table Channel",
+                          "table_channel_id",
+                        )}
+                        {channelSelect(
+                          "Signings Channel",
+                          "signings_channel_id",
+                        )}
+                        {channelSelect(
+                          "Releases Channel",
+                          "releases_channel_id",
+                        )}
+                        {channelSelect(
+                          "Budgets Channel",
+                          "budgets_channel_id",
+                        )}
+                        {channelSelect(
+                          "Transfers Channel",
+                          "transfers_channel_id",
+                        )}
+                        {channelSelect(
+                          "Loans Channel",
+                          "loans_channel_id",
+                        )}
+                        {channelSelect(
+                          "Transfer Window Channel",
+                          "transfer_window_channel_id",
+                        )}
+                        {channelSelect(
+                          "Announcements Channel",
+                          "announcements_channel_id",
+                        )}
+                      </div>
+                      <div className="mt-5 rounded-xl border border-dashed bg-background p-4">
+                        <p className="text-sm font-semibold">
+                          Discord channel picker
+                        </p>
+                        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                          These dropdowns are populated automatically from
+                          the connected Discord server. NOVA only shows
+                          selectable channel types and stores the selected
+                          Discord channel IDs behind the scenes.
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => void saveChannels()}
+                        disabled={saving}
+                        className="mt-5 inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+                      >
+                        {saving && (
+                          <Loader2 className="size-4 animate-spin" />
+                        )}
+                        Save Discord Settings
+                      </button>
+                    </>
+                  )}
                 </SettingsCard>
                 <div className="rounded-2xl border bg-card p-6">
                   <h2 className="text-lg font-bold">
                     Global announcements
                   </h2>
                   <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                    The configured Announcements Channel receives NOVA-wide
-                    announcements. Only NOVA Admin can actually send global
-                    announcements.
+                    The configured Announcements Channel receives
+                    NOVA-wide announcements. Only NOVA Admin can actually
+                    send global announcements.
                   </p>
                 </div>
               </div>
@@ -1715,7 +1844,10 @@ function LeaguePanel() {
                         "Unknown user";
                       return (
                         <div
-                          key={member.id ?? `${member.user_id}-${member.role}`}
+                          key={
+                            member.id ??
+                            `${member.user_id}-${member.role}`
+                          }
                           className="flex items-center justify-between rounded-xl border p-4"
                         >
                           <div className="flex items-center gap-3">
@@ -1768,7 +1900,9 @@ function LeaguePanel() {
                         {memberSearchResults.map((profile) => (
                           <button
                             key={profile.id}
-                            onClick={() => void addCoOverseer(profile)}
+                            onClick={() =>
+                              void addCoOverseer(profile)
+                            }
                             className="flex w-full items-center gap-3 rounded-lg p-3 text-left transition hover:bg-accent"
                           >
                             <div className="grid size-9 place-items-center rounded-full border">
@@ -1806,9 +1940,9 @@ function LeaguePanel() {
                       Division tier authority
                     </p>
                     <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                      Only NOVA Admins and the NOVA Owner can assign or change
-                      division tiers. The available levels are Elite, Tier 2
-                      and Tier 3.
+                      Only NOVA Admins and the NOVA Owner can assign or
+                      change division tiers. The available levels are
+                      Elite, Tier 2 and Tier 3.
                     </p>
                   </div>
                 </div>
@@ -1832,7 +1966,9 @@ function StatCard({
   return (
     <div className="rounded-2xl border bg-card p-5">
       <div className="flex items-center justify-between">
-        <span className="text-sm text-muted-foreground">{label}</span>
+        <span className="text-sm text-muted-foreground">
+          {label}
+        </span>
         {icon}
       </div>
       <p className="mt-4 text-3xl font-bold">{value}</p>
@@ -1979,6 +2115,8 @@ function toDateTimeLocal(value: string | null) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
   const offset = date.getTimezoneOffset();
-  const localDate = new Date(date.getTime() - offset * 60 * 1000);
+  const localDate = new Date(
+    date.getTime() - offset * 60 * 1000,
+  );
   return localDate.toISOString().slice(0, 16);
 }
