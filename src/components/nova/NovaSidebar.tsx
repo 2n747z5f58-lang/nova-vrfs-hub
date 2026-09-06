@@ -23,7 +23,6 @@ const links = [
   ["Leagues", "/leagues", Trophy],
   ["Fixtures", "/fixtures", Radio],
   ["Results", "/results", Medal],
-  ["Teams", "/teams", Shield],
   ["Players", "/players", Users],
   ["Transfers", "/transfers", Swords],
   ["Favourites", "/favourites", Heart],
@@ -51,20 +50,76 @@ export function NovaSidebar({
 }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const [role, setRole] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [isOwner, setIsOwner] = useState(false);
+  const [isLeagueManager, setIsLeagueManager] = useState(false);
+  const [isOzoneOwner, setIsOzoneOwner] = useState(false);
   useEffect(() => {
     let mounted = true;
-    supabase.auth.getUser().then(({ data }) => {
-      if (!mounted) return;
-      setRole(
-        (data.user?.app_metadata?.role ??
-          data.user?.user_metadata?.role) as string | null,
-      );
-    });
+    async function loadPanelPermissions() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user || !mounted) {
+        return;
+      }
+      const metadataRole =
+        user.app_metadata?.role ?? user.user_metadata?.role ?? null;
+      const admin =
+        metadataRole === "admin" ||
+        metadataRole === "owner";
+      const profileResponse = await supabase
+        .from("profiles")
+        .select("username, discord_id")
+        .eq("id", user.id)
+        .maybeSingle();
+      const profile = profileResponse.data;
+      const owner =
+        user.id === "aa23fr" ||
+        profile?.username === "aa23fr" ||
+        profile?.discord_id === "aa23fr";
+      const leagueMemberResponse = await supabase
+        .from("league_members")
+        .select("id")
+        .eq("user_id", user.id)
+        .limit(1);
+      const leagueManager =
+        !leagueMemberResponse.error &&
+        (leagueMemberResponse.data?.length ?? 0) > 0;
+      const ozoneResponse = await supabase
+        .from("ozone_settings")
+        .select("owner_id")
+        .limit(1)
+        .maybeSingle();
+      const ozoneOwner =
+        !ozoneResponse.error &&
+        ozoneResponse.data?.owner_id === user.id;
+      if (!mounted) {
+        return;
+      }
+      setIsAdmin(admin);
+      setIsOwner(owner);
+      setIsLeagueManager(leagueManager);
+      setIsOzoneOwner(ozoneOwner);
+    }
+    void loadPanelPermissions();
     return () => {
       mounted = false;
     };
   }, []);
+  const showAdminPanel = isAdmin || isOwner;
+  const showLeaguePanel =
+    isLeagueManager || isAdmin || isOwner;
+  const panelLinkClass = (to: string) =>
+    `flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
+      location.pathname === to
+        ? "bg-primary text-primary-foreground"
+        : "text-muted-foreground hover:bg-white/10 hover:text-foreground"
+    }`;
+  const handleNavigation = () => {
+    onClose?.();
+    playUiSound();
+  };
   return (
     <>
       {mobileOpen && (
@@ -105,10 +160,7 @@ export function NovaSidebar({
             <Link
               key={label}
               to={to as any}
-              onClick={() => {
-                onClose?.();
-                playUiSound();
-              }}
+              onClick={handleNavigation}
               className={`flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
                 location.pathname === to
                   ? "bg-primary text-primary-foreground"
@@ -119,35 +171,70 @@ export function NovaSidebar({
               {label}
             </Link>
           ))}
-          {role === "admin" && (
+          <div className="my-5 border-t border-border" />
+          <div className="px-3 pb-2 text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">
+            Panels
+          </div>
+          <Link
+            to={"/teams" as any}
+            onClick={handleNavigation}
+            className={panelLinkClass("/teams")}
+          >
+            <Shield className="size-4" />
+            Team Panel
+          </Link>
+          {showLeaguePanel && (
             <Link
-              to={"/admin" as any}
-              onClick={() => {
-                onClose?.();
-                playUiSound();
-              }}
-              className={`flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
-                location.pathname === "/admin"
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-white/10 hover:text-foreground"
-              }`}
+              to={"/league" as any}
+              onClick={handleNavigation}
+              className={panelLinkClass("/league")}
             >
-              <Shield className="size-4" />
-              Admin
+              <Trophy className="size-4" />
+              League Panel
             </Link>
           )}
-          <div className="my-4 border-t border-border" />
+          {showAdminPanel && (
+            <Link
+              to={"/admin" as any}
+              onClick={handleNavigation}
+              className={panelLinkClass("/admin")}
+            >
+              <Shield className="size-4" />
+              Admin Panel
+            </Link>
+          )}
+          {isOzoneOwner && (
+            <Link
+              to={"/ozone" as any}
+              onClick={handleNavigation}
+              className={panelLinkClass("/ozone")}
+            >
+              <Radio className="size-4" />
+              OZone Panel
+            </Link>
+          )}
+          <div className="my-5 border-t border-border" />
+          <Link
+            to={"/fantasy" as any}
+            onClick={handleNavigation}
+            className={panelLinkClass("/fantasy")}
+          >
+            <span className="text-sm">✨</span>
+            Fantasy
+          </Link>
+          <Link
+            to={"/shop" as any}
+            onClick={handleNavigation}
+            className={panelLinkClass("/shop")}
+          >
+            <span className="text-sm">🪙</span>
+            NOVA Shop
+          </Link>
+          <div className="my-5 border-t border-border" />
           <Link
             to={"/profile" as any}
-            onClick={() => {
-              onClose?.();
-              playUiSound();
-            }}
-            className={`flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
-              location.pathname === "/profile"
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:bg-white/10 hover:text-foreground"
-            }`}
+            onClick={handleNavigation}
+            className={panelLinkClass("/profile")}
           >
             <User className="size-4" />
             Profile
@@ -187,7 +274,9 @@ export function NovaHeader({
       const {
         data: { user },
       } = await supabase.auth.getUser();
-      if (!user || !mounted) return;
+      if (!user || !mounted) {
+        return;
+      }
       const { data } = await supabase
         .from("profiles")
         .select("display_name, username, avatar_url")
@@ -215,30 +304,36 @@ export function NovaHeader({
       setSearching(true);
       setSearchOpen(true);
       const pattern = `%${query}%`;
-      const [profilesResponse, playersResponse, teamsResponse, leaguesResponse] =
-        await Promise.all([
-          supabase
-            .from("profiles")
-            .select("id, display_name, username, avatar_url")
-            .or(`display_name.ilike.${pattern},username.ilike.${pattern}`)
-            .limit(5),
-          supabase
-            .from("players")
-            .select("id, name, username, avatar_url")
-            .or(`name.ilike.${pattern},username.ilike.${pattern}`)
-            .limit(5),
-          supabase
-            .from("teams")
-            .select("id, name, logo_url")
-            .ilike("name", pattern)
-            .limit(5),
-          supabase
-            .from("leagues")
-            .select("id, name, logo_url")
-            .ilike("name", pattern)
-            .limit(5),
-        ]);
-      if (cancelled) return;
+      const [
+        profilesResponse,
+        playersResponse,
+        teamsResponse,
+        leaguesResponse,
+      ] = await Promise.all([
+        supabase
+          .from("profiles")
+          .select("id, display_name, username, avatar_url")
+          .or(`display_name.ilike.${pattern},username.ilike.${pattern}`)
+          .limit(5),
+        supabase
+          .from("players")
+          .select("id, name, username, avatar_url")
+          .or(`name.ilike.${pattern},username.ilike.${pattern}`)
+          .limit(5),
+        supabase
+          .from("teams")
+          .select("id, name, logo_url")
+          .ilike("name", pattern)
+          .limit(5),
+        supabase
+          .from("leagues")
+          .select("id, name, logo_url")
+          .ilike("name", pattern)
+          .limit(5),
+      ]);
+      if (cancelled) {
+        return;
+      }
       const nextResults: SearchResult[] = [];
       if (!profilesResponse.error && profilesResponse.data) {
         for (const profile of profilesResponse.data) {
@@ -262,7 +357,10 @@ export function NovaHeader({
           nextResults.push({
             type: "player",
             id: player.id,
-            name: player.name || player.username || "Unnamed player",
+            name:
+              player.name ||
+              player.username ||
+              "Unnamed player",
             subtitle: "Player",
             avatar_url: player.avatar_url,
             route: `/players/${player.id}`,
@@ -306,17 +404,23 @@ export function NovaHeader({
     setSearch("");
     setResults([]);
     setSearchOpen(false);
-    void navigate({ to: result.route as any });
+    void navigate({
+      to: result.route as any,
+    });
   };
   const submitSearch = () => {
-    if (!search.trim()) return;
+    if (!search.trim()) {
+      return;
+    }
     if (results.length > 0) {
       goToSearchResult(results[0]);
       return;
     }
     void navigate({
       to: "/search" as any,
-      search: { q: search.trim() } as any,
+      search: {
+        q: search.trim(),
+      } as any,
     });
     setSearchOpen(false);
   };
