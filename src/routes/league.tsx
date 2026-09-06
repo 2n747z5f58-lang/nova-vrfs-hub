@@ -71,100 +71,117 @@ function LeaguePanel() {
     void loadPanel();
   }, []);
   async function loadPanel() {
-    setLoading(true);
-    setError(null);
-    setAccessDenied(false);
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) {
-      void navigate({ to: "/auth" });
-      return;
-    }
-    /*
-     * IMPORTANT:
-     * League access is determined from league_members.
-     * Do not rely on app_metadata, user_metadata, or ownership of a team.
-     */
-    const { data: memberships, error: membershipError } = await supabase
-      .from("league_members")
-      .select("league_id,role")
-      .eq("user_id", user.id)
-      .in("role", ["overseer", "co_overseer"]);
-    if (membershipError) {
-      console.error("Failed to load league memberships:", membershipError);
-      setError("Couldn't check your league permissions.");
-      setLoading(false);
-      return;
-    }
-    const memberRows = (memberships ?? []) as LeagueMember[];
-    if (memberRows.length === 0) {
-      setAccessDenied(true);
-      setLoading(false);
-      return;
-    }
-    const membership = memberRows[0];
-    const { data: leagueData, error: leagueError } = await supabase
-      .from("leagues")
-      .select("id,name,slug,status")
-      .eq("id", membership.league_id)
-      .maybeSingle();
-    if (leagueError || !leagueData) {
-      console.error("Failed to load league:", leagueError);
-      setError("Couldn't load your league.");
-      setLoading(false);
-      return;
-    }
-    setLeague(leagueData as League);
-    setMemberRole(membership.role);
-    const [{ data: divisionData, error: divisionError }, { data: teamData, error: teamError }] =
-      await Promise.all([
+    try {
+      setLoading(true);
+      setError(null);
+      setAccessDenied(false);
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        void navigate({ to: "/auth" });
+        return;
+      }
+      const { data: memberships, error: membershipError } = await supabase
+        .from("league_members")
+        .select("league_id,role")
+        .eq("user_id", user.id)
+        .in("role", ["overseer", "co_overseer"]);
+      if (membershipError) {
+        console.error(membershipError);
+        setError(
+          `Couldn't check league permissions: ${membershipError.message}`,
+        );
+        setLoading(false);
+        return;
+      }
+      const memberRows = (memberships ?? []) as LeagueMember[];
+      if (memberRows.length === 0) {
+        setAccessDenied(true);
+        setLoading(false);
+        return;
+      }
+      const membership = memberRows[0];
+      const { data: leagueData, error: leagueError } = await supabase
+        .from("leagues")
+        .select("id,name,slug,status")
+        .eq("id", membership.league_id)
+        .maybeSingle();
+      if (leagueError) {
+        console.error(leagueError);
+        setError(`Couldn't load your league: ${leagueError.message}`);
+        setLoading(false);
+        return;
+      }
+      if (!leagueData) {
+        setError(
+          "Your league permission exists, but the league itself could not be found.",
+        );
+        setLoading(false);
+        return;
+      }
+      const currentLeague = leagueData as League;
+      setLeague(currentLeague);
+      setMemberRole(membership.role);
+      const [divisionResponse, teamResponse] = await Promise.all([
         supabase
           .from("divisions")
           .select("id,league_id,name,slug")
-          .eq("league_id", membership.league_id)
+          .eq("league_id", currentLeague.id)
           .order("name", { ascending: true }),
         supabase
           .from("teams")
           .select(
             "id,name,short_name,logo_url,league_id,division_id,manager_id",
           )
-          .eq("league_id", membership.league_id)
+          .eq("league_id", currentLeague.id)
           .order("name", { ascending: true }),
       ]);
-    if (divisionError) {
-      console.error("Failed to load divisions:", divisionError);
-      setError("Couldn't load league divisions.");
-      setLoading(false);
-      return;
-    }
-    if (teamError) {
-      console.error("Failed to load teams:", teamError);
-      setError("Couldn't load league teams.");
-      setLoading(false);
-      return;
-    }
-    const divisionsList = (divisionData ?? []) as Division[];
-    const teamsList = (teamData ?? []) as Team[];
-    setDivisions(divisionsList);
-    setConfirmedTeams(teamsList);
-    const managerIds = teamsList
-      .map((team) => team.manager_id)
-      .filter((id): id is string => Boolean(id));
-    if (managerIds.length > 0) {
-      const { data: profileData } = await supabase
-        .from("profiles")
-        .select("id,display_name,username")
-        .in("id", managerIds);
-      const profileMap: Record<string, Profile> = {};
-      for (const profile of (profileData ?? []) as Profile[]) {
-        profileMap[profile.id] = profile;
+      if (divisionResponse.error) {
+        console.error(divisionResponse.error);
+        setError(
+          `Couldn't load divisions: ${divisionResponse.error.message}`,
+        );
+        setLoading(false);
+        return;
       }
-      setProfiles(profileMap);
-    } else {
-      setProfiles({});
+      if (teamResponse.error) {
+        console.error(teamResponse.error);
+        setError(`Couldn't load teams: ${teamResponse.error.message}`);
+        setLoading(false);
+        return;
+      }
+      const divisionsList = (divisionResponse.data ??
+        []) as Division[];
+      const teamsList = (teamResponse.data ?? []) as Team[];
+      setDivisions(divisionsList);
+      setConfirmedTeams(teamsList);
+      const managerIds = teamsList
+        .map((team) => team.manager_id)
+        .filter((id): id is string => Boolean(id));
+      if (managerIds.length > 0) {
+        const { data: profileData } = await supabase
+          .from("profiles")
+          .select("id,display_name,username")
+          .in("id", managerIds);
+        const profileMap: Record<string, Profile> = {};
+        for (const profile of (profileData ?? []) as Profile[]) {
+          profileMap[profile.id] = profile;
+        }
+        setProfiles(profileMap);
+      } else {
+        setProfiles({});
+      }
+    } catch (err) {
+      console.error(err);
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Something went wrong while loading the League Panel.",
+      );
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
   async function searchTeams(value: string) {
     setTeamSearch(value);
@@ -183,7 +200,7 @@ function LeaguePanel() {
       .order("name", { ascending: true })
       .limit(20);
     if (searchError) {
-      console.error("Failed to search teams:", searchError);
+      console.error(searchError);
       setTeamResults([]);
       setSearchingTeams(false);
       return;
@@ -207,7 +224,7 @@ function LeaguePanel() {
       )
       .single();
     if (updateError) {
-      console.error("Failed to confirm team:", updateError);
+      console.error(updateError);
       setError(updateError.message);
       setSavingTeam(false);
       return;
@@ -248,7 +265,7 @@ function LeaguePanel() {
       .eq("id", team.id)
       .eq("league_id", league.id);
     if (updateError) {
-      console.error("Failed to remove team:", updateError);
+      console.error(updateError);
       setError(updateError.message);
       return;
     }
@@ -272,16 +289,17 @@ function LeaguePanel() {
     if (!team.manager_id) return "No manager";
     const profile = profiles[team.manager_id];
     if (!profile) return "Manager";
-    return (
-      profile.display_name ||
-      profile.username ||
-      "Manager"
-    );
+    return profile.display_name || profile.username || "Manager";
   }
   if (loading) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-background">
-        <Loader2 className="size-6 animate-spin text-muted-foreground" />
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="size-7 animate-spin text-primary" />
+          <p className="text-sm text-muted-foreground">
+            Loading League Panel...
+          </p>
+        </div>
       </main>
     );
   }
@@ -299,19 +317,78 @@ function LeaguePanel() {
             Your account is not currently assigned as an overseer or
             co-overseer of a league.
           </p>
-          <Link
-            to="/"
-            className="mt-6 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground"
-          >
-            Return home
-            <ArrowRight className="size-4" />
-          </Link>
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-center">
+            <button
+              onClick={() => void loadPanel()}
+              className="rounded-lg border bg-card px-4 py-2.5 text-sm font-semibold"
+            >
+              Try again
+            </button>
+            <Link
+              to="/"
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground"
+            >
+              Return home
+              <ArrowRight className="size-4" />
+            </Link>
+          </div>
+        </div>
+      </main>
+    );
+  }
+  if (error) {
+    return (
+      <main className="min-h-screen bg-background px-5 py-10">
+        <div className="mx-auto max-w-xl">
+          <div className="rounded-2xl border bg-card p-6 md:p-8">
+            <div className="grid size-12 place-items-center rounded-xl bg-destructive/10">
+              <CircleAlert className="size-6 text-destructive" />
+            </div>
+            <h1 className="mt-5 text-2xl font-bold">
+              League Panel couldn't load
+            </h1>
+            <p className="mt-3 text-sm leading-6 text-muted-foreground">
+              {error}
+            </p>
+            <div className="mt-6 flex flex-wrap gap-3">
+              <button
+                onClick={() => void loadPanel()}
+                className="rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground"
+              >
+                Try again
+              </button>
+              <Link
+                to="/"
+                className="rounded-lg border px-4 py-2.5 text-sm font-semibold"
+              >
+                Return home
+              </Link>
+            </div>
+          </div>
         </div>
       </main>
     );
   }
   if (!league) {
-    return null;
+    return (
+      <main className="min-h-screen bg-background px-5 py-10">
+        <div className="mx-auto max-w-xl text-center">
+          <CircleAlert className="mx-auto size-10 text-muted-foreground" />
+          <h1 className="mt-5 text-2xl font-bold">
+            No league loaded
+          </h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            NOVA couldn't determine which league this panel belongs to.
+          </p>
+          <button
+            onClick={() => void loadPanel()}
+            className="mt-6 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground"
+          >
+            Try again
+          </button>
+        </div>
+      </main>
+    );
   }
   return (
     <main className="min-h-screen bg-background">
@@ -326,7 +403,9 @@ function LeaguePanel() {
             </h1>
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <span className="rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide">
-                {memberRole === "overseer" ? "Overseer" : "Co-Overseer"}
+                {memberRole === "overseer"
+                  ? "Overseer"
+                  : "Co-Overseer"}
               </span>
               {league.status && (
                 <span className="rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -343,12 +422,6 @@ function LeaguePanel() {
             <ArrowRight className="size-4" />
           </Link>
         </div>
-        {error && (
-          <div className="mt-6 flex items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm">
-            <CircleAlert className="mt-0.5 size-4 shrink-0 text-destructive" />
-            <p>{error}</p>
-          </div>
-        )}
         <div className="mt-8 grid gap-3 border-b pb-3 sm:flex sm:flex-wrap">
           <button
             onClick={() => setActiveSection("overview")}
@@ -417,9 +490,8 @@ function LeaguePanel() {
                     League operations
                   </h2>
                   <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                    Confirm teams into divisions from the central NOVA team
-                    database. Teams do not automatically enter a league when
-                    they are created.
+                    Manage your league, divisions and confirmed NOVA
+                    teams from one place.
                   </p>
                 </div>
               </div>
@@ -434,7 +506,8 @@ function LeaguePanel() {
                   No divisions yet
                 </h2>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  This league does not have any divisions configured yet.
+                  This league does not have any divisions configured
+                  yet.
                 </p>
               </div>
             ) : (
@@ -475,7 +548,9 @@ function LeaguePanel() {
                               />
                             ) : (
                               <div className="grid size-10 place-items-center rounded-lg border text-xs font-bold">
-                                {team.name.slice(0, 2).toUpperCase()}
+                                {team.name
+                                  .slice(0, 2)
+                                  .toUpperCase()}
                               </div>
                             )}
                             <div className="min-w-0 flex-1">
@@ -506,19 +581,16 @@ function LeaguePanel() {
         {activeSection === "teams" && (
           <section className="mt-8 space-y-8">
             <div className="rounded-xl border bg-card p-6">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Add team
-                </p>
-                <h2 className="mt-1 text-xl font-bold">
-                  Confirm a NOVA team
-                </h2>
-                <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-                  Search every team registered on NOVA. A team link is not
-                  required. Select the exact team, choose its division, then
-                  confirm it.
-                </p>
-              </div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Add team
+              </p>
+              <h2 className="mt-1 text-xl font-bold">
+                Confirm a NOVA team
+              </h2>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+                Search every team registered on NOVA, select the exact
+                team, choose its division, then confirm it.
+              </p>
               <div className="relative mt-6">
                 <div className="flex items-center gap-3 rounded-lg border bg-background px-3">
                   <Search className="size-4 shrink-0 text-muted-foreground" />
@@ -560,7 +632,9 @@ function LeaguePanel() {
                             />
                           ) : (
                             <div className="grid size-9 place-items-center rounded-lg border text-[10px] font-bold">
-                              {team.name.slice(0, 2).toUpperCase()}
+                              {team.name
+                                .slice(0, 2)
+                                .toUpperCase()}
                             </div>
                           )}
                           <div className="min-w-0 flex-1">
@@ -591,7 +665,9 @@ function LeaguePanel() {
                       />
                     ) : (
                       <div className="grid size-11 place-items-center rounded-lg border text-xs font-bold">
-                        {selectedTeam.name.slice(0, 2).toUpperCase()}
+                        {selectedTeam.name
+                          .slice(0, 2)
+                          .toUpperCase()}
                       </div>
                     )}
                     <div className="min-w-0 flex-1">
@@ -699,7 +775,9 @@ function LeaguePanel() {
                               />
                             ) : (
                               <div className="grid size-9 place-items-center rounded-lg border text-[10px] font-bold">
-                                {team.name.slice(0, 2).toUpperCase()}
+                                {team.name
+                                  .slice(0, 2)
+                                  .toUpperCase()}
                               </div>
                             )}
                             <div className="min-w-0">
