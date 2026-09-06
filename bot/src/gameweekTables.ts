@@ -33,8 +33,10 @@ type Standing = {
   points: number;
 };
 
-type LeagueChannelSettings = {
-  table_channel_id: string | null;
+type TableRow = {
+  position: number;
+  team: Team;
+  standing: Standing;
 };
 
 type GuildSettings = {
@@ -42,16 +44,14 @@ type GuildSettings = {
   league_id: string | null;
 };
 
-type TableRow = {
-  position: number;
-  team: Team;
-  standing: Standing;
+type ChannelSettings = {
+  table_channel_id: string | null;
 };
 
 let watcherStarted = false;
 
 /* =========================
-   HELPERS
+   XML HELPERS
 ========================= */
 
 function escapeXml(value: string): string {
@@ -63,459 +63,10 @@ function escapeXml(value: string): string {
     .replace(/'/g, "&apos;");
 }
 
-function formatNumber(value: number): string {
-  return Number.isFinite(value) ? String(value) : "0";
-}
-
-function getInitials(name: string): string {
-  const words = name
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
-
-  if (words.length === 0) {
-    return "?";
-  }
-
-  if (words.length === 1) {
-    return words[0].slice(0, 2).toUpperCase();
-  }
-
-  return (
-    words[0].charAt(0) +
-    words[1].charAt(0)
-  ).toUpperCase();
-}
-
-/* =========================
-   TABLE SVG
-========================= */
-
-function buildTableSvg(
-  leagueName: string,
-  divisionName: string,
-  rows: TableRow[],
+function escapeXmlAttribute(
+  value: string,
 ): string {
-  const width = 1400;
-
-  const headerHeight = 180;
-  const rowHeight = 88;
-  const footerHeight = 70;
-
-  const height =
-    headerHeight +
-    rows.length * rowHeight +
-    footerHeight;
-
-  const columns = {
-    position: 90,
-    team: 610,
-    played: 95,
-    won: 95,
-    drawn: 95,
-    lost: 95,
-    gf: 95,
-    ga: 95,
-    gd: 105,
-    points: 130,
-  };
-
-  const tableX = 50;
-  const tableWidth = width - 100;
-
-  const teamX =
-    tableX + columns.position;
-
-  const playedX =
-    teamX + columns.team;
-
-  const wonX =
-    playedX + columns.played;
-
-  const drawnX =
-    wonX + columns.won;
-
-  const lostX =
-    drawnX + columns.drawn;
-
-  const gfX =
-    lostX + columns.lost;
-
-  const gaX =
-    gfX + columns.gf;
-
-  const gdX =
-    gaX + columns.ga;
-
-  const pointsX =
-    gdX + columns.gd;
-
-  const headerY = 105;
-
-  let svg = `
-<svg
-  xmlns="http://www.w3.org/2000/svg"
-  width="${width}"
-  height="${height}"
-  viewBox="0 0 ${width} ${height}"
->
-  <rect
-    x="0"
-    y="0"
-    width="${width}"
-    height="${height}"
-    fill="#050505"
-  />
-
-  <rect
-    x="0"
-    y="0"
-    width="${width}"
-    height="${headerHeight}"
-    fill="#0d0d0d"
-  />
-
-  <text
-    x="50"
-    y="58"
-    fill="#ffffff"
-    font-family="DejaVu Sans"
-    font-size="34"
-    font-weight="700"
-  >
-    NOVA
-  </text>
-
-  <text
-    x="50"
-    y="105"
-    fill="#ffffff"
-    font-family="DejaVu Sans"
-    font-size="42"
-    font-weight="700"
-  >
-    ${escapeXml(leagueName)}
-  </text>
-
-  <text
-    x="50"
-    y="145"
-    fill="#a1a1aa"
-    font-family="DejaVu Sans"
-    font-size="25"
-    font-weight="500"
-  >
-    ${escapeXml(divisionName)} • League Table
-  </text>
-
-  <rect
-    x="${tableX}"
-    y="${headerHeight}"
-    width="${tableWidth}"
-    height="${rowHeight}"
-    fill="#161616"
-  />
-
-  <text
-    x="${tableX + columns.position / 2}"
-    y="${headerY + headerHeight - 105}"
-    fill="#a1a1aa"
-    font-family="DejaVu Sans"
-    font-size="20"
-    font-weight="700"
-    text-anchor="middle"
-  >
-    #
-  </text>
-
-  <text
-    x="${teamX + 25}"
-    y="${headerY + headerHeight - 105}"
-    fill="#a1a1aa"
-    font-family="DejaVu Sans"
-    font-size="20"
-    font-weight="700"
-  >
-    TEAM
-  </text>
-
-  <text
-    x="${playedX + columns.played / 2}"
-    y="${headerY + headerHeight - 105}"
-    fill="#a1a1aa"
-    font-family="DejaVu Sans"
-    font-size="20"
-    font-weight="700"
-    text-anchor="middle"
-  >
-    P
-  </text>
-
-  <text
-    x="${wonX + columns.won / 2}"
-    y="${headerY + headerHeight - 105}"
-    fill="#a1a1aa"
-    font-family="DejaVu Sans"
-    font-size="20"
-    font-weight="700"
-    text-anchor="middle"
-  >
-    W
-  </text>
-
-  <text
-    x="${drawnX + columns.drawn / 2}"
-    y="${headerY + headerHeight - 105}"
-    fill="#a1a1aa"
-    font-family="DejaVu Sans"
-    font-size="20"
-    font-weight="700"
-    text-anchor="middle"
-  >
-    D
-  </text>
-
-  <text
-    x="${lostX + columns.lost / 2}"
-    y="${headerY + headerHeight - 105}"
-    fill="#a1a1aa"
-    font-family="DejaVu Sans"
-    font-size="20"
-    font-weight="700"
-    text-anchor="middle"
-  >
-    L
-  </text>
-
-  <text
-    x="${gfX + columns.gf / 2}"
-    y="${headerY + headerHeight - 105}"
-    fill="#a1a1aa"
-    font-family="DejaVu Sans"
-    font-size="20"
-    font-weight="700"
-    text-anchor="middle"
-  >
-    GF
-  </text>
-
-  <text
-    x="${gaX + columns.ga / 2}"
-    y="${headerY + headerHeight - 105}"
-    fill="#a1a1aa"
-    font-family="DejaVu Sans"
-    font-size="20"
-    font-weight="700"
-    text-anchor="middle"
-  >
-    GA
-  </text>
-
-  <text
-    x="${gdX + columns.gd / 2}"
-    y="${headerY + headerHeight - 105}"
-    fill="#a1a1aa"
-    font-family="DejaVu Sans"
-    font-size="20"
-    font-weight="700"
-    text-anchor="middle"
-  >
-    GD
-  </text>
-
-  <text
-    x="${pointsX + columns.points / 2}"
-    y="${headerY + headerHeight - 105}"
-    fill="#ffffff"
-    font-family="DejaVu Sans"
-    font-size="20"
-    font-weight="700"
-    text-anchor="middle"
-  >
-    PTS
-  </text>
-`;
-
-  rows.forEach((row, index) => {
-    const y =
-      headerHeight +
-      rowHeight +
-      index * rowHeight;
-
-    const standing = row.standing;
-
-    const rowBackground =
-      index % 2 === 0
-        ? "#0d0d0d"
-        : "#111111";
-
-    svg += `
-  <rect
-    x="${tableX}"
-    y="${y}"
-    width="${tableWidth}"
-    height="${rowHeight}"
-    fill="${rowBackground}"
-  />
-
-  <line
-    x1="${tableX}"
-    y1="${y + rowHeight}"
-    x2="${tableX + tableWidth}"
-    y2="${y + rowHeight}"
-    stroke="#242424"
-    stroke-width="1"
-  />
-
-  <text
-    x="${tableX + columns.position / 2}"
-    y="${y + 56}"
-    fill="${index < 4 ? "#ffffff" : "#a1a1aa"}"
-    font-family="DejaVu Sans"
-    font-size="25"
-    font-weight="700"
-    text-anchor="middle"
-  >
-    ${row.position}
-  </text>
-
-  <circle
-    cx="${teamX + 25}"
-    cy="${y + rowHeight / 2}"
-    r="25"
-    fill="#202020"
-  />
-
-  <text
-    x="${teamX + 25}"
-    y="${y + rowHeight / 2 + 8}"
-    fill="#ffffff"
-    font-family="DejaVu Sans"
-    font-size="17"
-    font-weight="700"
-    text-anchor="middle"
-  >
-    ${escapeXml(getInitials(row.team.name))}
-  </text>
-
-  <text
-    x="${teamX + 65}"
-    y="${y + 55}"
-    fill="#ffffff"
-    font-family="DejaVu Sans"
-    font-size="24"
-    font-weight="600"
-  >
-    ${escapeXml(row.team.name)}
-  </text>
-
-  <text
-    x="${playedX + columns.played / 2}"
-    y="${y + 55}"
-    fill="#d4d4d8"
-    font-family="DejaVu Sans"
-    font-size="23"
-    text-anchor="middle"
-  >
-    ${formatNumber(standing.played)}
-  </text>
-
-  <text
-    x="${wonX + columns.won / 2}"
-    y="${y + 55}"
-    fill="#d4d4d8"
-    font-family="DejaVu Sans"
-    font-size="23"
-    text-anchor="middle"
-  >
-    ${formatNumber(standing.won)}
-  </text>
-
-  <text
-    x="${drawnX + columns.drawn / 2}"
-    y="${y + 55}"
-    fill="#d4d4d8"
-    font-family="DejaVu Sans"
-    font-size="23"
-    text-anchor="middle"
-  >
-    ${formatNumber(standing.drawn)}
-  </text>
-
-  <text
-    x="${lostX + columns.lost / 2}"
-    y="${y + 55}"
-    fill="#d4d4d8"
-    font-family="DejaVu Sans"
-    font-size="23"
-    text-anchor="middle"
-  >
-    ${formatNumber(standing.lost)}
-  </text>
-
-  <text
-    x="${gfX + columns.gf / 2}"
-    y="${y + 55}"
-    fill="#d4d4d8"
-    font-family="DejaVu Sans"
-    font-size="23"
-    text-anchor="middle"
-  >
-    ${formatNumber(standing.goals_for)}
-  </text>
-
-  <text
-    x="${gaX + columns.ga / 2}"
-    y="${y + 55}"
-    fill="#d4d4d8"
-    font-family="DejaVu Sans"
-    font-size="23"
-    text-anchor="middle"
-  >
-    ${formatNumber(standing.goals_against)}
-  </text>
-
-  <text
-    x="${gdX + columns.gd / 2}"
-    y="${y + 55}"
-    fill="${standing.goal_difference >= 0 ? "#d4d4d8" : "#f4f4f5"}"
-    font-family="DejaVu Sans"
-    font-size="23"
-    text-anchor="middle"
-  >
-    ${standing.goal_difference > 0 ? "+" : ""}${formatNumber(standing.goal_difference)}
-  </text>
-
-  <text
-    x="${pointsX + columns.points / 2}"
-    y="${y + 57}"
-    fill="#ffffff"
-    font-family="DejaVu Sans"
-    font-size="28"
-    font-weight="800"
-    text-anchor="middle"
-  >
-    ${formatNumber(standing.points)}
-  </text>
-`;
-  });
-
-  svg += `
-  <text
-    x="${width - 50}"
-    y="${height - 25}"
-    fill="#52525b"
-    font-family="DejaVu Sans"
-    font-size="17"
-    text-anchor="end"
-  >
-    NOVA • VRFS
-  </text>
-
-</svg>
-`;
-
-  return svg;
+  return escapeXml(value);
 }
 
 /* =========================
@@ -543,9 +94,9 @@ async function getGuildSettings(
   return data as GuildSettings | null;
 }
 
-async function getTableChannelSettings(
+async function getChannelSettings(
   leagueId: string,
-): Promise<LeagueChannelSettings | null> {
+): Promise<ChannelSettings | null> {
   const { data, error } = await supabase
     .from("league_channel_settings")
     .select("table_channel_id")
@@ -554,14 +105,14 @@ async function getTableChannelSettings(
 
   if (error) {
     console.error(
-      `Failed to load channel settings for league ${leagueId}:`,
+      `Failed to load table channel settings for league ${leagueId}:`,
       error,
     );
 
     return null;
   }
 
-  return data as LeagueChannelSettings | null;
+  return data as ChannelSettings | null;
 }
 
 async function getTeams(
@@ -595,16 +146,7 @@ async function getStandings(
     .select(
       "team_id,played,won,drawn,lost,goals_for,goals_against,goal_difference,points",
     )
-    .eq("division_id", divisionId)
-    .order("points", {
-      ascending: false,
-    })
-    .order("goal_difference", {
-      ascending: false,
-    })
-    .order("goals_for", {
-      ascending: false,
-    });
+    .eq("division_id", divisionId);
 
   if (error) {
     console.error(
@@ -619,66 +161,7 @@ async function getStandings(
 }
 
 /* =========================
-   POST TRACKING
-========================= */
-
-async function hasTablePost(
-  divisionId: string,
-  cycleStartedAt: string,
-  gameweekNumber: number,
-): Promise<boolean> {
-  const { data, error } = await supabase
-    .from("gameweek_table_posts")
-    .select("id")
-    .eq("division_id", divisionId)
-    .eq("cycle_started_at", cycleStartedAt)
-    .eq("gameweek_number", gameweekNumber)
-    .maybeSingle();
-
-  if (error) {
-    console.error(
-      `Failed to check table post for division ${divisionId}, GW${gameweekNumber}:`,
-      error,
-    );
-
-    return false;
-  }
-
-  return Boolean(data);
-}
-
-/* =========================
-   IMAGE GENERATION
-========================= */
-
-async function generateTablePng(
-  leagueName: string,
-  divisionName: string,
-  rows: TableRow[],
-): Promise<Buffer> {
-  const svg = buildTableSvg(
-    leagueName,
-    divisionName,
-    rows,
-  );
-
-  const renderer = new Resvg(svg, {
-    fitTo: {
-      mode: "original",
-    },
-    font: {
-      loadSystemFonts: true,
-      defaultFontFamily: "DejaVu Sans",
-    },
-  });
-
-  return renderer
-    .render()
-    .asPng();
-}
-
-/* =========================
-   TABLE BUILDING
+   TABLE
 ========================= */
 
 async function buildTable(
@@ -701,22 +184,27 @@ async function buildTable(
   }
 
   const rows: TableRow[] = teams.map(
-    (team) => ({
-      position: 0,
-      team,
-      standing:
-        standingsByTeam.get(team.id) ?? {
-          team_id: team.id,
-          played: 0,
-          won: 0,
-          drawn: 0,
-          lost: 0,
-          goals_for: 0,
-          goals_against: 0,
-          goal_difference: 0,
-          points: 0,
-        },
-    }),
+    (team) => {
+      const existing =
+        standingsByTeam.get(team.id);
+
+      return {
+        position: 0,
+        team,
+        standing:
+          existing ?? {
+            team_id: team.id,
+            played: 0,
+            won: 0,
+            drawn: 0,
+            lost: 0,
+            goals_for: 0,
+            goals_against: 0,
+            goal_difference: 0,
+            points: 0,
+          },
+      };
+    },
   );
 
   rows.sort((a, b) => {
@@ -763,6 +251,554 @@ async function buildTable(
 }
 
 /* =========================
+   LOGO
+========================= */
+
+function createLogoMarkup(
+  team: Team,
+  x: number,
+  y: number,
+  size: number,
+): string {
+  const centreX = x + size / 2;
+  const centreY = y + size / 2;
+  const radius = size / 2;
+
+  if (team.logo_url) {
+    return `
+      <circle
+        cx="${centreX}"
+        cy="${centreY}"
+        r="${radius}"
+        fill="#1f1f1f"
+      />
+
+      <image
+        href="${escapeXmlAttribute(team.logo_url)}"
+        x="${x}"
+        y="${y}"
+        width="${size}"
+        height="${size}"
+        preserveAspectRatio="xMidYMid meet"
+      />
+    `;
+  }
+
+  const initials = team.name
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((word) =>
+      word.charAt(0).toUpperCase(),
+    )
+    .join("");
+
+  return `
+    <circle
+      cx="${centreX}"
+      cy="${centreY}"
+      r="${radius}"
+      fill="#242424"
+    />
+
+    <text
+      x="${centreX}"
+      y="${centreY + 9}"
+      fill="#ffffff"
+      font-family="DejaVu Sans"
+      font-size="22"
+      font-weight="700"
+      text-anchor="middle"
+    >
+      ${escapeXml(initials || "?")}
+    </text>
+  `;
+}
+
+/* =========================
+   SVG
+========================= */
+
+function buildTableSvg(
+  leagueName: string,
+  divisionName: string,
+  rows: TableRow[],
+): string {
+  const width = 1500;
+
+  const topHeight = 190;
+  const headerHeight = 80;
+  const rowHeight = 100;
+  const bottomHeight = 70;
+
+  const height =
+    topHeight +
+    headerHeight +
+    rows.length * rowHeight +
+    bottomHeight;
+
+  const left = 50;
+  const right = 50;
+
+  const tableWidth =
+    width - left - right;
+
+  const positionWidth = 90;
+  const teamWidth = 570;
+  const statWidth = 92;
+  const goalDiffWidth = 105;
+  const pointsWidth = 120;
+
+  const teamX =
+    left + positionWidth;
+
+  const playedX =
+    teamX + teamWidth;
+
+  const wonX =
+    playedX + statWidth;
+
+  const drawnX =
+    wonX + statWidth;
+
+  const lostX =
+    drawnX + statWidth;
+
+  const gfX =
+    lostX + statWidth;
+
+  const gaX =
+    gfX + statWidth;
+
+  const gdX =
+    gaX + statWidth;
+
+  const pointsX =
+    gdX + goalDiffWidth;
+
+  let svg = `
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width="${width}"
+  height="${height}"
+  viewBox="0 0 ${width} ${height}"
+>
+  <rect
+    width="${width}"
+    height="${height}"
+    fill="#050505"
+  />
+
+  <rect
+    x="0"
+    y="0"
+    width="${width}"
+    height="${topHeight}"
+    fill="#0d0d0d"
+  />
+
+  <text
+    x="${left}"
+    y="52"
+    fill="#ffffff"
+    font-family="DejaVu Sans"
+    font-size="32"
+    font-weight="800"
+  >
+    NOVA
+  </text>
+
+  <text
+    x="${left}"
+    y="108"
+    fill="#ffffff"
+    font-family="DejaVu Sans"
+    font-size="42"
+    font-weight="800"
+  >
+    ${escapeXml(leagueName)}
+  </text>
+
+  <text
+    x="${left}"
+    y="151"
+    fill="#a1a1aa"
+    font-family="DejaVu Sans"
+    font-size="24"
+    font-weight="500"
+  >
+    ${escapeXml(divisionName)} • League Table
+  </text>
+
+  <rect
+    x="${left}"
+    y="${topHeight}"
+    width="${tableWidth}"
+    height="${headerHeight}"
+    fill="#171717"
+  />
+
+  <text
+    x="${left + positionWidth / 2}"
+    y="${topHeight + 51}"
+    fill="#a1a1aa"
+    font-family="DejaVu Sans"
+    font-size="19"
+    font-weight="700"
+    text-anchor="middle"
+  >
+    #
+  </text>
+
+  <text
+    x="${teamX + 30}"
+    y="${topHeight + 51}"
+    fill="#a1a1aa"
+    font-family="DejaVu Sans"
+    font-size="19"
+    font-weight="700"
+  >
+    TEAM
+  </text>
+
+  <text
+    x="${playedX + statWidth / 2}"
+    y="${topHeight + 51}"
+    fill="#a1a1aa"
+    font-family="DejaVu Sans"
+    font-size="19"
+    font-weight="700"
+    text-anchor="middle"
+  >
+    P
+  </text>
+
+  <text
+    x="${wonX + statWidth / 2}"
+    y="${topHeight + 51}"
+    fill="#a1a1aa"
+    font-family="DejaVu Sans"
+    font-size="19"
+    font-weight="700"
+    text-anchor="middle"
+  >
+    W
+  </text>
+
+  <text
+    x="${drawnX + statWidth / 2}"
+    y="${topHeight + 51}"
+    fill="#a1a1aa"
+    font-family="DejaVu Sans"
+    font-size="19"
+    font-weight="700"
+    text-anchor="middle"
+  >
+    D
+  </text>
+
+  <text
+    x="${lostX + statWidth / 2}"
+    y="${topHeight + 51}"
+    fill="#a1a1aa"
+    font-family="DejaVu Sans"
+    font-size="19"
+    font-weight="700"
+    text-anchor="middle"
+  >
+    L
+  </text>
+
+  <text
+    x="${gfX + statWidth / 2}"
+    y="${topHeight + 51}"
+    fill="#a1a1aa"
+    font-family="DejaVu Sans"
+    font-size="19"
+    font-weight="700"
+    text-anchor="middle"
+  >
+    GF
+  </text>
+
+  <text
+    x="${gaX + statWidth / 2}"
+    y="${topHeight + 51}"
+    fill="#a1a1aa"
+    font-family="DejaVu Sans"
+    font-size="19"
+    font-weight="700"
+    text-anchor="middle"
+  >
+    GA
+  </text>
+
+  <text
+    x="${gdX + goalDiffWidth / 2}"
+    y="${topHeight + 51}"
+    fill="#a1a1aa"
+    font-family="DejaVu Sans"
+    font-size="19"
+    font-weight="700"
+    text-anchor="middle"
+  >
+    GD
+  </text>
+
+  <text
+    x="${pointsX + pointsWidth / 2}"
+    y="${topHeight + 51}"
+    fill="#ffffff"
+    font-family="DejaVu Sans"
+    font-size="19"
+    font-weight="800"
+    text-anchor="middle"
+  >
+    PTS
+  </text>
+`;
+
+  rows.forEach((row, index) => {
+    const y =
+      topHeight +
+      headerHeight +
+      index * rowHeight;
+
+    const rowFill =
+      index % 2 === 0
+        ? "#0b0b0b"
+        : "#111111";
+
+    svg += `
+  <rect
+    x="${left}"
+    y="${y}"
+    width="${tableWidth}"
+    height="${rowHeight}"
+    fill="${rowFill}"
+  />
+
+  <line
+    x1="${left}"
+    y1="${y + rowHeight}"
+    x2="${left + tableWidth}"
+    y2="${y + rowHeight}"
+    stroke="#242424"
+    stroke-width="1"
+  />
+
+  <text
+    x="${left + positionWidth / 2}"
+    y="${y + 61}"
+    fill="#ffffff"
+    font-family="DejaVu Sans"
+    font-size="26"
+    font-weight="800"
+    text-anchor="middle"
+  >
+    ${row.position}
+  </text>
+
+  ${createLogoMarkup(
+    row.team,
+    teamX + 18,
+    y + 18,
+    64,
+  )}
+
+  <text
+    x="${teamX + 105}"
+    y="${y + 61}"
+    fill="#ffffff"
+    font-family="DejaVu Sans"
+    font-size="25"
+    font-weight="700"
+  >
+    ${escapeXml(row.team.name)}
+  </text>
+
+  <text
+    x="${playedX + statWidth / 2}"
+    y="${y + 61}"
+    fill="#d4d4d8"
+    font-family="DejaVu Sans"
+    font-size="23"
+    text-anchor="middle"
+  >
+    ${row.standing.played}
+  </text>
+
+  <text
+    x="${wonX + statWidth / 2}"
+    y="${y + 61}"
+    fill="#d4d4d8"
+    font-family="DejaVu Sans"
+    font-size="23"
+    text-anchor="middle"
+  >
+    ${row.standing.won}
+  </text>
+
+  <text
+    x="${drawnX + statWidth / 2}"
+    y="${y + 61}"
+    fill="#d4d4d8"
+    font-family="DejaVu Sans"
+    font-size="23"
+    text-anchor="middle"
+  >
+    ${row.standing.drawn}
+  </text>
+
+  <text
+    x="${lostX + statWidth / 2}"
+    y="${y + 61}"
+    fill="#d4d4d8"
+    font-family="DejaVu Sans"
+    font-size="23"
+    text-anchor="middle"
+  >
+    ${row.standing.lost}
+  </text>
+
+  <text
+    x="${gfX + statWidth / 2}"
+    y="${y + 61}"
+    fill="#d4d4d8"
+    font-family="DejaVu Sans"
+    font-size="23"
+    text-anchor="middle"
+  >
+    ${row.standing.goals_for}
+  </text>
+
+  <text
+    x="${gaX + statWidth / 2}"
+    y="${y + 61}"
+    fill="#d4d4d8"
+    font-family="DejaVu Sans"
+    font-size="23"
+    text-anchor="middle"
+  >
+    ${row.standing.goals_against}
+  </text>
+
+  <text
+    x="${gdX + goalDiffWidth / 2}"
+    y="${y + 61}"
+    fill="#d4d4d8"
+    font-family="DejaVu Sans"
+    font-size="23"
+    text-anchor="middle"
+  >
+    ${
+      row.standing.goal_difference > 0
+        ? "+"
+        : ""
+    }${row.standing.goal_difference}
+  </text>
+
+  <text
+    x="${pointsX + pointsWidth / 2}"
+    y="${y + 63}"
+    fill="#ffffff"
+    font-family="DejaVu Sans"
+    font-size="28"
+    font-weight="900"
+    text-anchor="middle"
+  >
+    ${row.standing.points}
+  </text>
+`;
+  });
+
+  svg += `
+  <text
+    x="${width - right}"
+    y="${height - 25}"
+    fill="#52525b"
+    font-family="DejaVu Sans"
+    font-size="17"
+    font-weight="600"
+    text-anchor="end"
+  >
+    NOVA • VRFS
+  </text>
+
+</svg>
+`;
+
+  return svg;
+}
+
+/* =========================
+   PNG
+========================= */
+
+async function generateTablePng(
+  leagueName: string,
+  divisionName: string,
+  rows: TableRow[],
+): Promise<Buffer> {
+  const svg = buildTableSvg(
+    leagueName,
+    divisionName,
+    rows,
+  );
+
+  const renderer = new Resvg(svg, {
+    fitTo: {
+      mode: "original",
+    },
+    font: {
+      loadSystemFonts: true,
+      defaultFontFamily:
+        "DejaVu Sans",
+    },
+  });
+
+  return renderer
+    .render()
+    .asPng();
+}
+
+/* =========================
+   POST TRACKING
+========================= */
+
+async function hasTablePost(
+  divisionId: string,
+  cycleStartedAt: string,
+  gameweekNumber: number,
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("gameweek_table_posts")
+    .select("id")
+    .eq("division_id", divisionId)
+    .eq(
+      "cycle_started_at",
+      cycleStartedAt,
+    )
+    .eq(
+      "gameweek_number",
+      gameweekNumber,
+    )
+    .maybeSingle();
+
+  if (error) {
+    console.error(
+      `Failed checking table post for division ${divisionId} GW${gameweekNumber}:`,
+      error,
+    );
+
+    return false;
+  }
+
+  return Boolean(data);
+}
+
+/* =========================
    POST TABLE
 ========================= */
 
@@ -789,18 +825,16 @@ async function postTable(
       division.league_id,
     );
 
-  if (
-    !guildSettings?.guild_id
-  ) {
+  if (!guildSettings?.guild_id) {
     console.log(
-      `No Discord guild connected to league ${division.league_id}.`,
+      `No Discord server connected to league ${division.league_id}.`,
     );
 
     return;
   }
 
   const channelSettings =
-    await getTableChannelSettings(
+    await getChannelSettings(
       division.league_id,
     );
 
@@ -851,11 +885,15 @@ async function postTable(
 
   if (rows.length === 0) {
     console.log(
-      `No teams in ${division.name}; skipping GW${gameweekNumber} table.`,
+      `No teams found for ${division.name}; skipping GW${gameweekNumber}.`,
     );
 
     return;
   }
+
+  console.log(
+    `Generating GW${gameweekNumber} table for ${leagueName} • ${division.name} using ${rows.length} teams.`,
+  );
 
   const png =
     await generateTablePng(
@@ -864,10 +902,32 @@ async function postTable(
       rows,
     );
 
-  const filename =
-    `nova-${leagueName}-${division.name}-gw${gameweekNumber}-table.png`
+  const safeLeagueName =
+    leagueName
       .toLowerCase()
-      .replace(/[^a-z0-9.-]+/g, "-");
+      .replace(
+        /[^a-z0-9]+/g,
+        "-",
+      )
+      .replace(
+        /^-+|-+$/g,
+        "",
+      );
+
+  const safeDivisionName =
+    division.name
+      .toLowerCase()
+      .replace(
+        /[^a-z0-9]+/g,
+        "-",
+      )
+      .replace(
+        /^-+|-+$/g,
+        "",
+      );
+
+  const filename =
+    `nova-${safeLeagueName}-${safeDivisionName}-gw${gameweekNumber}-table.png`;
 
   const attachment =
     new AttachmentBuilder(
@@ -903,7 +963,7 @@ async function postTable(
 
   if (error) {
     console.error(
-      `Failed to save table post record for ${division.name} GW${gameweekNumber}:`,
+      `Failed saving table-post record for ${division.name} GW${gameweekNumber}:`,
       error,
     );
 
@@ -911,12 +971,12 @@ async function postTable(
   }
 
   console.log(
-    `Posted automatic GW${gameweekNumber} table for ${leagueName} • ${division.name}.`,
+    `✅ Posted automatic GW${gameweekNumber} table for ${leagueName} • ${division.name}.`,
   );
 }
 
 /* =========================
-   FIXTURE CHECK
+   GAMEWEEK COMPLETE
 ========================= */
 
 async function gameweekIsComplete(
@@ -929,7 +989,7 @@ async function gameweekIsComplete(
   } = await supabase
     .from("fixtures")
     .select(
-      "id,home_score,away_score,status",
+      "id,home_score,away_score",
     )
     .eq(
       "division_id",
@@ -942,14 +1002,17 @@ async function gameweekIsComplete(
 
   if (error) {
     console.error(
-      `Failed to check fixtures for division ${divisionId} GW${gameweekNumber}:`,
+      `Failed checking fixtures for division ${divisionId} GW${gameweekNumber}:`,
       error,
     );
 
     return false;
   }
 
-  if (!fixtures || fixtures.length === 0) {
+  if (
+    !fixtures ||
+    fixtures.length === 0
+  ) {
     return false;
   }
 
@@ -961,7 +1024,7 @@ async function gameweekIsComplete(
 }
 
 /* =========================
-   DIVISION CHECK
+   DIVISION
 ========================= */
 
 async function checkDivision(
@@ -969,13 +1032,15 @@ async function checkDivision(
   division: Division,
   leagueName: string,
 ): Promise<void> {
-  if (division.status !== "active") {
+  if (
+    division.status !== "active"
+  ) {
     return;
   }
 
   if (!division.start_date) {
     console.log(
-      `Active division ${division.name} has no start_date; skipping automatic tables.`,
+      `Active division ${division.name} has no start_date. Skipping.`,
     );
 
     return;
@@ -995,10 +1060,8 @@ async function checkDivision(
 
   /*
    * GW0
-   *
-   * Posted once for this specific
-   * division + start_date cycle.
    */
+
   const gw0Posted =
     await hasTablePost(
       division.id,
@@ -1017,13 +1080,12 @@ async function checkDivision(
   }
 
   /*
-   * Find all gameweeks belonging
-   * to this division.
+   * Later gameweeks
    */
+
   const {
     data: gameweeks,
-    error:
-      gameweeksError,
+    error,
   } = await supabase
     .from("gameweeks")
     .select("number")
@@ -1035,10 +1097,10 @@ async function checkDivision(
       ascending: true,
     });
 
-  if (gameweeksError) {
+  if (error) {
     console.error(
-      `Failed to load gameweeks for ${division.name}:`,
-      gameweeksError,
+      `Failed loading gameweeks for ${division.name}:`,
+      error,
     );
 
     return;
@@ -1051,18 +1113,11 @@ async function checkDivision(
     return;
   }
 
-  /*
-   * Only post a gameweek table once
-   * every fixture in that gameweek
-   * has both scores recorded.
-   */
   for (const gameweek of gameweeks) {
-    const gameweekNumber =
+    const number =
       Number(gameweek.number);
 
-    if (
-      gameweekNumber < 1
-    ) {
+    if (number < 1) {
       continue;
     }
 
@@ -1070,7 +1125,7 @@ async function checkDivision(
       await hasTablePost(
         division.id,
         cycleStartedAt,
-        gameweekNumber,
+        number,
       );
 
     if (alreadyPosted) {
@@ -1080,14 +1135,12 @@ async function checkDivision(
     const complete =
       await gameweekIsComplete(
         division.id,
-        gameweekNumber,
+        number,
       );
 
     if (!complete) {
       /*
-       * Gameweeks are sequential.
-       * Don't post GW2 while GW1 is
-       * still unfinished.
+       * Keep gameweeks sequential.
        */
       break;
     }
@@ -1096,14 +1149,14 @@ async function checkDivision(
       client,
       division,
       leagueName,
-      gameweekNumber,
+      number,
       cycleStartedAt,
     );
   }
 }
 
 /* =========================
-   MAIN CHECK
+   MAIN WATCHER CHECK
 ========================= */
 
 async function checkGameweekTables(
@@ -1118,11 +1171,14 @@ async function checkGameweekTables(
     .select(
       "id,league_id,name,status,start_date",
     )
-    .eq("status", "active");
+    .eq(
+      "status",
+      "active",
+    );
 
   if (divisionsError) {
     console.error(
-      "Failed to load active divisions for automatic tables:",
+      "Failed loading active divisions:",
       divisionsError,
     );
 
@@ -1147,15 +1203,19 @@ async function checkGameweekTables(
 
   const {
     data: leagues,
-    error: leaguesError,
+    error:
+      leaguesError,
   } = await supabase
     .from("leagues")
     .select("id,name")
-    .in("id", leagueIds);
+    .in(
+      "id",
+      leagueIds,
+    );
 
   if (leaguesError) {
     console.error(
-      "Failed to load leagues for automatic tables:",
+      "Failed loading leagues:",
       leaguesError,
     );
 
@@ -1188,7 +1248,7 @@ async function checkGameweekTables(
 }
 
 /* =========================
-   WATCHER
+   START WATCHER
 ========================= */
 
 export function startGameweekTableWatcher(
