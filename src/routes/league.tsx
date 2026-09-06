@@ -51,6 +51,7 @@ type Profile = {
   id: string;
   display_name: string | null;
   username: string | null;
+  discord_id?: string | null;
 };
 
 type LeagueMember = {
@@ -92,6 +93,18 @@ type Section =
   | "discord"
   | "overseers";
 
+const NOVA_OWNER_IDENTIFIER = "aa23fr";
+
+const TIER_OPTIONS = [
+  { value: 1, label: "Elite" },
+  { value: 2, label: "Tier 2" },
+  { value: 3, label: "Tier 3" },
+];
+
+function getTierLabel(tier: number | null | undefined) {
+  return TIER_OPTIONS.find((option) => option.value === tier)?.label ?? "Elite";
+}
+
 export const Route = createFileRoute("/league")({
   ssr: false,
   component: LeaguePanel,
@@ -110,6 +123,9 @@ function LeaguePanel() {
   const [memberRole, setMemberRole] = useState<
     "overseer" | "co_overseer" | null
   >(null);
+
+  const [isNovaAdmin, setIsNovaAdmin] = useState(false);
+  const [isNovaOwner, setIsNovaOwner] = useState(false);
 
   const [divisions, setDivisions] = useState<Division[]>([]);
   const [confirmedTeams, setConfirmedTeams] = useState<Team[]>([]);
@@ -147,7 +163,6 @@ function LeaguePanel() {
   const [savingTeam, setSavingTeam] = useState(false);
 
   const [newDivisionName, setNewDivisionName] = useState("");
-  const [newDivisionTier, setNewDivisionTier] = useState("1");
   const [creatingDivision, setCreatingDivision] = useState(false);
 
   const [newCoOverseer, setNewCoOverseer] = useState("");
@@ -155,6 +170,8 @@ function LeaguePanel() {
   const [searchingMembers, setSearchingMembers] = useState(false);
 
   const [activeSection, setActiveSection] = useState<Section>("overview");
+
+  const canManageTiers = isNovaAdmin || isNovaOwner;
 
   useEffect(() => {
     void loadPanel();
@@ -174,6 +191,35 @@ function LeaguePanel() {
         return;
       }
 
+      let admin = false;
+      let owner = false;
+
+      const { data: roleData } = await supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", user.id);
+
+      admin = (roleData ?? []).some(
+        (row) => String(row.role).toLowerCase() === "admin",
+      );
+
+      const { data: ownerProfile } = await supabase
+        .from("profiles")
+        .select("id,username,discord_id")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (
+        user.id === NOVA_OWNER_IDENTIFIER ||
+        ownerProfile?.username === NOVA_OWNER_IDENTIFIER ||
+        ownerProfile?.discord_id === NOVA_OWNER_IDENTIFIER
+      ) {
+        owner = true;
+      }
+
+      setIsNovaAdmin(admin);
+      setIsNovaOwner(owner);
+
       const { data: memberships, error: membershipError } = await supabase
         .from("league_members")
         .select("id,league_id,user_id,role")
@@ -189,18 +235,32 @@ function LeaguePanel() {
 
       const memberRows = (memberships ?? []) as LeagueMember[];
 
-      if (memberRows.length === 0) {
+      if (memberRows.length === 0 && !admin && !owner) {
         setAccessDenied(true);
         return;
       }
 
-      const membership = memberRows[0];
+      let membership = memberRows[0];
+
+      if (!membership) {
+        const { data: firstLeagueMember } = await supabase
+          .from("league_members")
+          .select("id,league_id,user_id,role")
+          .order("created_at", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+
+        if (!firstLeagueMember) {
+          setAccessDenied(true);
+          return;
+        }
+
+        membership = firstLeagueMember as LeagueMember;
+      }
 
       const { data: leagueData, error: leagueError } = await supabase
         .from("leagues")
-        .select(
-          "id,name,slug,status,logo_url,description,season",
-        )
+        .select("id,name,slug,status,logo_url,description,season")
         .eq("id", membership.league_id)
         .maybeSingle();
 
@@ -280,7 +340,10 @@ function LeaguePanel() {
       setConfirmedTeams((teamResponse.data ?? []) as Team[]);
 
       if (settingsResponse.error) {
-        console.warn("League settings could not be loaded:", settingsResponse.error);
+        console.warn(
+          "League settings could not be loaded:",
+          settingsResponse.error,
+        );
       } else if (settingsResponse.data) {
         setSettings({
           ...(settingsResponse.data as LeagueSettings),
@@ -332,7 +395,7 @@ function LeaguePanel() {
       if (profileIds.length > 0) {
         const { data: profileData } = await supabase
           .from("profiles")
-          .select("id,display_name,username")
+          .select("id,display_name,username,discord_id")
           .in("id", profileIds);
 
         const profileMap: Record<string, Profile> = {};
@@ -480,12 +543,48 @@ function LeaguePanel() {
     setError(null);
     setSuccess(null);
 
+    let selectedTier = 1;
+
+    if (canManageTiers) {
+      const usedTiers = new Set(
+        divisions
+          .map((division) => division.tier ?? 1)
+          .filter((tier) => tier >= 1 && tier <= 3),
+      );
+
+      const nextAvailableTier = TIER_OPTIONS.find(
+        (option) => !usedTiers.has(option.value),
+      );
+
+      selectedTier = nextAvailableTier?.value ?? 1;
+    } else {
+      const usedTiers = new Set(
+        divisions
+          .map((division) => division.tier ?? 1)
+          .filter((tier) => tier >= 1 && tier <= 3),
+      );
+
+      const nextAvailableTier = TIER_OPTIONS.find(
+        (option) => !usedTiers.has(option.value),
+      );
+
+      if (!nextAvailableTier) {
+        setError(
+          "All three division tiers already exist. NOVA only supports Elite, Tier 2 and Tier 3.",
+        );
+        setCreatingDivision(false);
+        return;
+      }
+
+      selectedTier = nextAvailableTier.value;
+    }
+
     const { data, error: createError } = await supabase
       .from("divisions")
       .insert({
         league_id: league.id,
         name: newDivisionName.trim(),
-        tier: Number(newDivisionTier) || 1,
+        tier: selectedTier,
         season: league.season,
         status: "draft",
         gameweek_interval_days:
@@ -511,9 +610,72 @@ function LeaguePanel() {
     );
 
     setNewDivisionName("");
-    setNewDivisionTier("1");
     setCreatingDivision(false);
-    setSuccess(`${data.name} has been created.`);
+    setSuccess(
+      `${data.name} has been created as ${getTierLabel(data.tier)}.`,
+    );
+  }
+
+  async function updateDivisionTier(
+    division: Division,
+    tier: number,
+  ) {
+    if (!league || !canManageTiers) return;
+
+    if (![1, 2, 3].includes(tier)) {
+      setError("Invalid division tier.");
+      return;
+    }
+
+    const conflictingDivision = divisions.find(
+      (item) =>
+        item.id !== division.id &&
+        (item.tier ?? 1) === tier,
+    );
+
+    if (conflictingDivision) {
+      setError(
+        `${getTierLabel(tier)} is already assigned to ${conflictingDivision.name}.`,
+      );
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+    setSuccess(null);
+
+    const { data, error: updateError } = await supabase
+      .from("divisions")
+      .update({ tier })
+      .eq("id", division.id)
+      .eq("league_id", league.id)
+      .select(
+        "id,league_id,name,tier,season,status,gameweek_interval_days",
+      )
+      .single();
+
+    if (updateError) {
+      setError(updateError.message);
+      setSaving(false);
+      return;
+    }
+
+    setDivisions((current) =>
+      current
+        .map((item) =>
+          item.id === division.id ? (data as Division) : item,
+        )
+        .sort(
+          (a, b) =>
+            (a.tier ?? 1) - (b.tier ?? 1) ||
+            a.name.localeCompare(b.name),
+        ),
+    );
+
+    setSaving(false);
+    setSuccess(
+      `${division.name} is now ${getTierLabel(tier)}.`,
+    );
   }
 
   async function deleteDivision(division: Division) {
@@ -635,7 +797,7 @@ function LeaguePanel() {
 
     const { data, error: searchError } = await supabase
       .from("profiles")
-      .select("id,display_name,username")
+      .select("id,display_name,username,discord_id")
       .or(
         `username.ilike.%${value.trim()}%,display_name.ilike.%${value.trim()}%`,
       )
@@ -1145,7 +1307,7 @@ function LeaguePanel() {
 
                       {divisions.map((division) => (
                         <option key={division.id} value={division.id}>
-                          {division.name}
+                          {division.name} • {getTierLabel(division.tier)}
                         </option>
                       ))}
                     </select>
@@ -1187,9 +1349,15 @@ function LeaguePanel() {
                       <div key={division.id}>
                         <div className="mb-3 flex items-center justify-between">
                           <div>
-                            <h3 className="font-bold">
-                              {division.name}
-                            </h3>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h3 className="font-bold">
+                                {division.name}
+                              </h3>
+
+                              <span className="rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase">
+                                {getTierLabel(division.tier)}
+                              </span>
+                            </div>
 
                             <p className="text-xs text-muted-foreground">
                               {teamsByDivision[division.id]?.length ?? 0}{" "}
@@ -1254,11 +1422,11 @@ function LeaguePanel() {
                   <h2 className="text-xl font-bold">Create division</h2>
 
                   <p className="mt-2 text-sm text-muted-foreground">
-                    Create a new division for this league. Gameweeks default
-                    to every 3 days.
+                    Create a new division for this league. NOVA supports
+                    three division levels: Elite, Tier 2 and Tier 3.
                   </p>
 
-                  <div className="mt-5 grid gap-3 md:grid-cols-[1fr_140px_auto]">
+                  <div className="mt-5 grid gap-3 md:grid-cols-[1fr_auto]">
                     <input
                       value={newDivisionName}
                       onChange={(event) =>
@@ -1267,20 +1435,6 @@ function LeaguePanel() {
                       placeholder="Division name"
                       className="rounded-xl border bg-background px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/20"
                     />
-
-                    <select
-                      value={newDivisionTier}
-                      onChange={(event) =>
-                        setNewDivisionTier(event.target.value)
-                      }
-                      className="rounded-xl border bg-background px-3 py-3 text-sm"
-                    >
-                      {[1, 2, 3, 4, 5, 6].map((tier) => (
-                        <option key={tier} value={tier}>
-                          Tier {tier}
-                        </option>
-                      ))}
-                    </select>
 
                     <button
                       disabled={
@@ -1297,10 +1451,37 @@ function LeaguePanel() {
                       Create Division
                     </button>
                   </div>
+
+                  <div className="mt-4 rounded-xl border border-dashed bg-background p-4">
+                    <p className="text-xs leading-5 text-muted-foreground">
+                      {canManageTiers
+                        ? "As a NOVA Admin/Owner, you can assign or change a division's tier below."
+                        : "Division tiers are controlled by NOVA Admins and the NOVA Owner. League Overseers and Co-Overseers cannot select or change them."}
+                    </p>
+                  </div>
                 </div>
 
                 <div className="rounded-2xl border bg-card p-6">
-                  <h2 className="text-xl font-bold">Divisions</h2>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <h2 className="text-xl font-bold">Divisions</h2>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {divisions.length} division
+                        {divisions.length === 1 ? "" : "s"} configured.
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      {TIER_OPTIONS.map((option) => (
+                        <span
+                          key={option.value}
+                          className="rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide"
+                        >
+                          {option.label}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
 
                   <div className="mt-5 grid gap-3">
                     {divisions.map((division) => {
@@ -1313,14 +1494,16 @@ function LeaguePanel() {
                           className="flex flex-col gap-4 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between"
                         >
                           <div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
                               <h3 className="font-bold">
                                 {division.name}
                               </h3>
 
-                              <span className="rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase">
-                                Tier {division.tier ?? 1}
-                              </span>
+                              {!canManageTiers && (
+                                <span className="rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase">
+                                  {getTierLabel(division.tier)}
+                                </span>
+                              )}
                             </div>
 
                             <p className="mt-1 text-xs text-muted-foreground">
@@ -1329,13 +1512,38 @@ function LeaguePanel() {
                             </p>
                           </div>
 
-                          <button
-                            onClick={() => void deleteDivision(division)}
-                            className="inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold text-destructive transition hover:bg-destructive/10"
-                          >
-                            <Trash2 className="size-4" />
-                            Delete
-                          </button>
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                            {canManageTiers && (
+                              <select
+                                value={division.tier ?? 1}
+                                onChange={(event) =>
+                                  void updateDivisionTier(
+                                    division,
+                                    Number(event.target.value),
+                                  )
+                                }
+                                disabled={saving}
+                                className="rounded-lg border bg-background px-3 py-2 text-sm font-semibold outline-none focus:ring-2 focus:ring-primary/20"
+                              >
+                                {TIER_OPTIONS.map((option) => (
+                                  <option
+                                    key={option.value}
+                                    value={option.value}
+                                  >
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+
+                            <button
+                              onClick={() => void deleteDivision(division)}
+                              className="inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold text-destructive transition hover:bg-destructive/10"
+                            >
+                              <Trash2 className="size-4" />
+                              Delete
+                            </button>
+                          </div>
                         </div>
                       );
                     })}
@@ -1726,6 +1934,18 @@ function LeaguePanel() {
                     league. They do not receive NOVA-wide administrator
                     permissions.
                   </p>
+
+                  <div className="mt-5 rounded-xl border bg-background p-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Division tier authority
+                    </p>
+
+                    <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                      Only NOVA Admins and the NOVA Owner can assign or change
+                      division tiers. The available levels are Elite, Tier 2
+                      and Tier 3.
+                    </p>
+                  </div>
                 </div>
               </div>
             )}
