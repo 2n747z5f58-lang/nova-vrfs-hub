@@ -4,7 +4,7 @@ import {
   Client,
   Message,
 } from "discord.js";
-import { Resvg } from "@resvg/resvg-js";
+import sharp from "sharp";
 
 import { supabase } from "./database.js";
 
@@ -443,13 +443,11 @@ function createLogoMarkup(
       x="${centreX}"
       y="${centreY + 9}"
       fill="#ffffff"
-      font-family="DejaVu Sans"
+      font-family="sans-serif"
       font-size="22"
       font-weight="700"
       text-anchor="middle"
-    >
-      ${escapeXml(initials || "?")}
-    </text>
+    >${escapeXml(initials || "?")}</text>
   `;
 }
 
@@ -481,13 +479,6 @@ function buildTableSvg(
 
   const tableWidth = width - left - right;
 
-  /*
-   * These widths deliberately add up to the exact table width.
-   *
-   * 90 + 600 + (92 × 6) + 105 + 120 = 1467
-   *
-   * The remaining space is given to TEAM.
-   */
   const positionWidth = 90;
   const statWidth = 92;
   const goalDiffWidth = 105;
@@ -535,34 +526,28 @@ function buildTableSvg(
     x="${left}"
     y="52"
     fill="#ffffff"
-    font-family="DejaVu Sans"
+    font-family="sans-serif"
     font-size="32"
     font-weight="800"
-  >
-    NOVA
-  </text>
+  >NOVA</text>
 
   <text
     x="${left}"
     y="108"
     fill="#ffffff"
-    font-family="DejaVu Sans"
+    font-family="sans-serif"
     font-size="42"
     font-weight="800"
-  >
-    ${escapeXml(leagueName)}
-  </text>
+  >${escapeXml(leagueName)}</text>
 
   <text
     x="${left}"
     y="151"
     fill="#a1a1aa"
-    font-family="DejaVu Sans"
+    font-family="sans-serif"
     font-size="24"
     font-weight="500"
-  >
-    ${escapeXml(divisionName)} • League Table
-  </text>
+  >${escapeXml(divisionName)} • League Table</text>
 
   <rect
     x="${left}"
@@ -576,120 +561,100 @@ function buildTableSvg(
     x="${left + positionWidth / 2}"
     y="${topHeight + 51}"
     fill="#a1a1aa"
-    font-family="DejaVu Sans"
+    font-family="sans-serif"
     font-size="19"
     font-weight="700"
     text-anchor="middle"
-  >
-    #
-  </text>
+  >#</text>
 
   <text
     x="${teamX + 30}"
     y="${topHeight + 51}"
     fill="#a1a1aa"
-    font-family="DejaVu Sans"
+    font-family="sans-serif"
     font-size="19"
     font-weight="700"
-  >
-    TEAM
-  </text>
+  >TEAM</text>
 
   <text
     x="${playedX + statWidth / 2}"
     y="${topHeight + 51}"
     fill="#a1a1aa"
-    font-family="DejaVu Sans"
+    font-family="sans-serif"
     font-size="19"
     font-weight="700"
     text-anchor="middle"
-  >
-    P
-  </text>
+  >P</text>
 
   <text
     x="${wonX + statWidth / 2}"
     y="${topHeight + 51}"
     fill="#a1a1aa"
-    font-family="DejaVu Sans"
+    font-family="sans-serif"
     font-size="19"
     font-weight="700"
     text-anchor="middle"
-  >
-    W
-  </text>
+  >W</text>
 
   <text
     x="${drawnX + statWidth / 2}"
     y="${topHeight + 51}"
     fill="#a1a1aa"
-    font-family="DejaVu Sans"
+    font-family="sans-serif"
     font-size="19"
     font-weight="700"
     text-anchor="middle"
-  >
-    D
-  </text>
+  >D</text>
 
   <text
     x="${lostX + statWidth / 2}"
     y="${topHeight + 51}"
     fill="#a1a1aa"
-    font-family="DejaVu Sans"
+    font-family="sans-serif"
     font-size="19"
     font-weight="700"
     text-anchor="middle"
-  >
-    L
-  </text>
+  >L</text>
 
   <text
     x="${gfX + statWidth / 2}"
     y="${topHeight + 51}"
     fill="#a1a1aa"
-    font-family="DejaVu Sans"
+    font-family="sans-serif"
     font-size="19"
     font-weight="700"
     text-anchor="middle"
-  >
-    GF
-  </text>
+  >GF</text>
 
   <text
     x="${gaX + statWidth / 2}"
     y="${topHeight + 51}"
     fill="#a1a1aa"
-    font-family="DejaVu Sans"
+    font-family="sans-serif"
     font-size="19"
     font-weight="700"
     text-anchor="middle"
-  >
-    GA
-  </text>
+  >GA</text>
 
   <text
     x="${gdX + goalDiffWidth / 2}"
     y="${topHeight + 51}"
     fill="#a1a1aa"
-    font-family="DejaVu Sans"
+    font-family="sans-serif"
     font-size="19"
     font-weight="700"
     text-anchor="middle"
-  >
-    GD
-  </text>
+  >GD</text>
 
   <text
     x="${pointsX + pointsWidth / 2}"
     y="${topHeight + 51}"
     fill="#ffffff"
-    font-family="DejaVu Sans"
+    font-family="sans-serif"
     font-size="19"
     font-weight="800"
     text-anchor="middle"
-  >
-    PTS
-  </text>
+  >PTS</text>
 `;
 
   rows.forEach((row, index) => {
@@ -704,6 +669,11 @@ function buildTableSvg(
         : "#111111";
 
     const standing = row.standing;
+
+    const goalDifferenceText =
+      standing.goal_difference > 0
+        ? `+${standing.goal_difference}`
+        : `${standing.goal_difference}`;
 
     svg += `
   <rect
@@ -727,13 +697,11 @@ function buildTableSvg(
     x="${left + positionWidth / 2}"
     y="${y + 61}"
     fill="#ffffff"
-    font-family="DejaVu Sans"
+    font-family="sans-serif"
     font-size="26"
     font-weight="800"
     text-anchor="middle"
-  >
-    ${row.position}
-  </text>
+  >${row.position}</text>
 
   ${createLogoMarkup(
     row.team,
@@ -747,105 +715,83 @@ function buildTableSvg(
     x="${teamX + 105}"
     y="${y + 61}"
     fill="#ffffff"
-    font-family="DejaVu Sans"
+    font-family="sans-serif"
     font-size="25"
     font-weight="700"
-  >
-    ${escapeXml(row.team.name)}
-  </text>
+  >${escapeXml(row.team.name)}</text>
 
   <text
     x="${playedX + statWidth / 2}"
     y="${y + 61}"
     fill="#d4d4d8"
-    font-family="DejaVu Sans"
+    font-family="sans-serif"
     font-size="23"
     text-anchor="middle"
-  >
-    ${standing.played}
-  </text>
+  >${standing.played}</text>
 
   <text
     x="${wonX + statWidth / 2}"
     y="${y + 61}"
     fill="#d4d4d8"
-    font-family="DejaVu Sans"
+    font-family="sans-serif"
     font-size="23"
     text-anchor="middle"
-  >
-    ${standing.won}
-  </text>
+  >${standing.won}</text>
 
   <text
     x="${drawnX + statWidth / 2}"
     y="${y + 61}"
     fill="#d4d4d8"
-    font-family="DejaVu Sans"
+    font-family="sans-serif"
     font-size="23"
     text-anchor="middle"
-  >
-    ${standing.drawn}
-  </text>
+  >${standing.drawn}</text>
 
   <text
     x="${lostX + statWidth / 2}"
     y="${y + 61}"
     fill="#d4d4d8"
-    font-family="DejaVu Sans"
+    font-family="sans-serif"
     font-size="23"
     text-anchor="middle"
-  >
-    ${standing.lost}
-  </text>
+  >${standing.lost}</text>
 
   <text
     x="${gfX + statWidth / 2}"
     y="${y + 61}"
     fill="#d4d4d8"
-    font-family="DejaVu Sans"
+    font-family="sans-serif"
     font-size="23"
     text-anchor="middle"
-  >
-    ${standing.goals_for}
-  </text>
+  >${standing.goals_for}</text>
 
   <text
     x="${gaX + statWidth / 2}"
     y="${y + 61}"
     fill="#d4d4d8"
-    font-family="DejaVu Sans"
+    font-family="sans-serif"
     font-size="23"
     text-anchor="middle"
-  >
-    ${standing.goals_against}
-  </text>
+  >${standing.goals_against}</text>
 
   <text
     x="${gdX + goalDiffWidth / 2}"
     y="${y + 61}"
     fill="#d4d4d8"
-    font-family="DejaVu Sans"
+    font-family="sans-serif"
     font-size="23"
     text-anchor="middle"
-  >
-    ${
-      standing.goal_difference > 0
-        ? "+"
-        : ""
-    }${standing.goal_difference}
-  </text>
+  >${goalDifferenceText}</text>
 
   <text
     x="${pointsX + pointsWidth / 2}"
     y="${y + 63}"
     fill="#ffffff"
-    font-family="DejaVu Sans"
+    font-family="sans-serif"
     font-size="28"
     font-weight="900"
     text-anchor="middle"
-  >
-    ${standing.points}
-  </text>
+  >${standing.points}</text>
 `;
   });
 
@@ -854,13 +800,11 @@ function buildTableSvg(
     x="${width - right}"
     y="${height - 25}"
     fill="#52525b"
-    font-family="DejaVu Sans"
+    font-family="sans-serif"
     font-size="17"
     font-weight="600"
     text-anchor="end"
-  >
-    NOVA • VRFS
-  </text>
+  >NOVA • VRFS</text>
 
 </svg>
 `;
@@ -896,21 +840,22 @@ async function generateTablePng(
 
   log(`SVG generated (${svg.length} characters).`);
 
-  const renderer = new Resvg(svg, {
-    fitTo: {
-      mode: "original",
-    },
-    font: {
-      loadSystemFonts: true,
-      defaultFontFamily: "DejaVu Sans",
-    },
-  });
-
-  const png = renderer.render().asPng();
+  /*
+   * Use Sharp/libvips for SVG -> PNG conversion.
+   *
+   * This avoids the previous Resvg text-rendering issue.
+   * The SVG still contains all of the same table graphics,
+   * but Sharp handles the final text rasterisation.
+   */
+  const png = await sharp(
+    Buffer.from(svg, "utf8"),
+  )
+    .png()
+    .toBuffer();
 
   if (!png || png.length < 100) {
     throw new Error(
-      `Renderer returned an invalid PNG (${png?.length ?? 0} bytes).`,
+      `Sharp returned an invalid PNG (${png?.length ?? 0} bytes).`,
     );
   }
 
@@ -933,7 +878,7 @@ async function generateTablePng(
 
   if (!validSignature) {
     throw new Error(
-      "Renderer output does not contain a valid PNG signature.",
+      "Sharp output does not contain a valid PNG signature.",
     );
   }
 
@@ -1118,10 +1063,6 @@ async function postTable(
       return;
     }
 
-    /*
-     * We only reach this point when the database says the
-     * table exists but Discord does not have a usable post.
-     */
     await deleteBrokenTrackingRecord(
       existingPost,
     );
@@ -1284,11 +1225,6 @@ async function postTable(
       error,
     );
 
-    /*
-     * The Discord post succeeded, so do not delete it.
-     * The next watcher cycle will see the missing DB record
-     * and post again if the insert failed.
-     */
     return;
   }
 
