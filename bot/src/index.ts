@@ -4,6 +4,8 @@ import {
   Client,
   Events,
   GatewayIntentBits,
+  Interaction,
+  RepliableInteraction,
 } from "discord.js";
 
 import {
@@ -151,7 +153,7 @@ client.on(
 client.on(
   Events.ChannelCreate,
   async (channel) => {
-    if (channel.guild) {
+    if ("guild" in channel && channel.guild) {
       await syncGuildDiscordOptions(channel.guild.id);
     }
   },
@@ -160,7 +162,7 @@ client.on(
 client.on(
   Events.ChannelUpdate,
   async (channel) => {
-    if (channel.guild) {
+    if ("guild" in channel && channel.guild) {
       await syncGuildDiscordOptions(channel.guild.id);
     }
   },
@@ -169,7 +171,7 @@ client.on(
 client.on(
   Events.ChannelDelete,
   async (channel) => {
-    if (channel.guild) {
+    if ("guild" in channel && channel.guild) {
       await syncGuildDiscordOptions(channel.guild.id);
     }
   },
@@ -181,7 +183,7 @@ client.on(
 
 client.on(
   Events.InteractionCreate,
-  async (interaction) => {
+  async (interaction: Interaction) => {
     try {
       if (interaction.isChatInputCommand()) {
         await handleCommand(interaction);
@@ -198,18 +200,25 @@ client.on(
         error,
       );
 
+      if (!interaction.isRepliable()) {
+        return;
+      }
+
+      const replyable =
+        interaction as RepliableInteraction;
+
       try {
         if (
-          interaction.replied ||
-          interaction.deferred
+          replyable.replied ||
+          replyable.deferred
         ) {
-          await interaction.followUp({
+          await replyable.followUp({
             content:
               "❌ Something went wrong while running that NOVA action.",
             ephemeral: true,
           });
         } else {
-          await interaction.reply({
+          await replyable.reply({
             content:
               "❌ Something went wrong while running that NOVA action.",
             ephemeral: true,
