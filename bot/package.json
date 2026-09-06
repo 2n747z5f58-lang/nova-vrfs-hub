@@ -10,6 +10,7 @@
     "deploy-commands": "tsx src/deploy-commands.ts"
   },
   "dependencies": {
+    "@resvg/resvg-js": "^2.6.2",
     "@supabase/supabase-js": "^2.57.4",
     "discord.js": "^14.25.1",
     "dotenv": "^17.2.1",
