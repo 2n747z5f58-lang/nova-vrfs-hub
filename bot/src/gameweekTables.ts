@@ -3,14 +3,18 @@ import {
   ChannelType,
   Client,
 } from "discord.js";
+
 import {
   createCanvas,
   loadImage,
   registerFont,
   type Image,
 } from "canvas";
+
 import { existsSync } from "fs";
-import { dirname, join } from "path";
+import { join } from "path";
+import { fileURLToPath } from "url";
+
 import { supabase } from "./database.js";
 
 type Division = {
@@ -87,16 +91,17 @@ const BODY_START_Y = TOP_HEIGHT + HEADER_HEIGHT;
 const FONT_FAMILY = "DejaVu Sans";
 
 const FONT_CANDIDATES = [
-  join(
-    dirname(__dirname),
-    "assets",
-    "fonts",
-    "DejaVuSans.ttf",
+  fileURLToPath(
+    new URL(
+      "../assets/fonts/DejaVuSans.ttf",
+      import.meta.url,
+    ),
   ),
-  join(
-    dirname(__dirname),
-    "fonts",
-    "DejaVuSans.ttf",
+  fileURLToPath(
+    new URL(
+      "../fonts/DejaVuSans.ttf",
+      import.meta.url,
+    ),
   ),
   join(
     process.cwd(),
