@@ -266,38 +266,21 @@ function drawText(
 }
 
 async function getGuildSettings(
-  guildId: string,
+  leagueId: string,
 ) {
-  const { data, error } = await supabase
-    .from("league_channel_settings")
-    .select("*")
-    .eq("guild_id", guildId)
-    .maybeSingle();
+  const { data, error } =
+    await supabase
+      .from("league_channel_settings")
+      .select("*")
+      .eq(
+        "league_id",
+        leagueId,
+      )
+      .maybeSingle();
 
   if (error) {
     console.error(
-      "[TABLES] Failed to load guild settings:",
-      error,
-    );
-  }
-
-  return data;
-}
-
-async function getChannelSettings(
-  guildId: string,
-  divisionId: string,
-) {
-  const { data, error } = await supabase
-    .from("division_channel_settings")
-    .select("*")
-    .eq("guild_id", guildId)
-    .eq("division_id", divisionId)
-    .maybeSingle();
-
-  if (error) {
-    console.error(
-      "[TABLES] Failed to load division channel settings:",
+      "[TABLES] Failed to load league channel settings:",
       error,
     );
   }
@@ -308,15 +291,19 @@ async function getChannelSettings(
 async function getTeams(
   divisionId: string,
 ): Promise<Team[]> {
-  const { data, error } = await supabase
-    .from("teams")
-    .select(
-      "id,name,logo_url,division_id",
-    )
-    .eq("division_id", divisionId)
-    .order("name", {
-      ascending: true,
-    });
+  const { data, error } =
+    await supabase
+      .from("teams")
+      .select(
+        "id,name,logo_url,division_id",
+      )
+      .eq(
+        "division_id",
+        divisionId,
+      )
+      .order("name", {
+        ascending: true,
+      });
 
   if (error) {
     console.error(
@@ -333,22 +320,26 @@ async function getTeams(
 async function getStandings(
   divisionId: string,
 ): Promise<Standing[]> {
-  const { data, error } = await supabase
-    .from("standings")
-    .select(
-      [
-        "team_id",
-        "played",
-        "wins",
-        "draws",
-        "losses",
-        "goals_for",
-        "goals_against",
-        "goal_difference",
-        "points",
-      ].join(","),
-    )
-    .eq("division_id", divisionId);
+  const { data, error } =
+    await supabase
+      .from("standings")
+      .select(
+        [
+          "team_id",
+          "played",
+          "wins",
+          "draws",
+          "losses",
+          "goals_for",
+          "goals_against",
+          "goal_difference",
+          "points",
+        ].join(","),
+      )
+      .eq(
+        "division_id",
+        divisionId,
+      );
 
   if (error) {
     console.error(
@@ -366,10 +357,8 @@ function buildTable(
   teams: Team[],
   standings: Standing[],
 ): TableRow[] {
-  const standingsByTeam = new Map<
-    string,
-    Standing
-  >();
+  const standingsByTeam =
+    new Map<string, Standing>();
 
   for (const standing of standings) {
     standingsByTeam.set(
@@ -1057,7 +1046,7 @@ async function getTablePost(
         divisionId,
       )
       .eq(
-        "gameweek",
+        "gameweek_number",
         gameweek,
       )
       .order("created_at", {
@@ -1075,7 +1064,19 @@ async function getTablePost(
     return null;
   }
 
-  return data as TrackedPost | null;
+  if (!data) {
+    return null;
+  }
+
+  return {
+    id: data.id,
+    division_id: data.division_id,
+    gameweek: Number(
+      data.gameweek_number,
+    ),
+    channel_id: data.channel_id,
+    message_id: data.message_id,
+  };
 }
 
 async function deleteTrackedPost(
@@ -1148,34 +1149,17 @@ async function postTable(
   division: Division,
   gameweekNumber: number,
 ) {
-  const guildSettings =
+  const leagueSettings =
     await getGuildSettings(
       division.league_id,
     );
 
-  const guildId =
-    guildSettings?.guild_id;
-
-  if (!guildId) {
-    console.warn(
-      `[TABLES] No guild configured for league ${division.league_id}`,
-    );
-
-    return;
-  }
-
-  const channelSettings =
-    await getChannelSettings(
-      guildId,
-      division.id,
-    );
-
   const channelId =
-    channelSettings?.table_channel_id;
+    leagueSettings?.table_channel_id;
 
   if (!channelId) {
     console.warn(
-      `[TABLES] No table channel configured for division ${division.id}`,
+      `[TABLES] No table channel configured for league ${division.league_id}`,
     );
 
     return;
@@ -1266,7 +1250,8 @@ async function postTable(
       .from("gameweek_table_posts")
       .insert({
         division_id: division.id,
-        gameweek: gameweekNumber,
+        gameweek_number:
+          gameweekNumber,
         channel_id: channelId,
         message_id: message.id,
       })
@@ -1488,8 +1473,10 @@ export async function checkGameweekTables(
     return;
   }
 
-  for (const division of
-    (divisions ?? []) as unknown as Division[]) {
+  for (
+    const division of
+      (divisions ?? []) as unknown as Division[]
+  ) {
     try {
       await checkDivision(
         client,
