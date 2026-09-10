@@ -11,7 +11,7 @@ import {
 } from "canvas";
 import { existsSync } from "fs";
 import { dirname, join } from "path";
-import { supabase } from "./supabase.js";
+import { supabase } from "./database.js";
 
 type Division = {
   id: string;
