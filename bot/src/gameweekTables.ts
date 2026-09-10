@@ -6,8 +6,45 @@ import {
 import {
   createCanvas,
   loadImage,
+  registerFont,
 } from "canvas";
 import { supabase } from "./database.js";
+import path from "node:path";
+
+/* =========================================================
+   FONTS
+========================================================= */
+
+const FONTS_DIR = path.join(
+  process.cwd(),
+  "fonts",
+);
+
+const INTER_REGULAR = path.join(
+  FONTS_DIR,
+  "Inter-Regular.ttf",
+);
+
+const INTER_BOLD = path.join(
+  FONTS_DIR,
+  "Inter-Bold.ttf",
+);
+
+registerFont(
+  INTER_REGULAR,
+  {
+    family: "Inter",
+    weight: "400",
+  },
+);
+
+registerFont(
+  INTER_BOLD,
+  {
+    family: "Inter",
+    weight: "700",
+  },
+);
 
 /* =========================================================
    NOVA GAMEWEEK TABLES
@@ -166,6 +203,7 @@ function centerText(
   y: number,
 ) {
   ctx.textAlign = "center";
+
   ctx.fillText(
     text,
     x,
@@ -180,6 +218,7 @@ function rightText(
   y: number,
 ) {
   ctx.textAlign = "right";
+
   ctx.fillText(
     text,
     x,
@@ -290,7 +329,7 @@ function drawFallbackLogo(
   ctx.font =
     `700 ${Math.round(
       size * 0.3,
-    )}px sans-serif`;
+    )}px "Inter"`;
 
   centerText(
     ctx,
@@ -333,10 +372,6 @@ async function drawTeamLogo(
   }
 
   try {
-    /*
-     * Background circle
-     */
-
     ctx.save();
 
     ctx.beginPath();
@@ -356,10 +391,6 @@ async function drawTeamLogo(
 
     ctx.restore();
 
-    /*
-     * CLIP IMAGE TO CIRCLE
-     */
-
     ctx.save();
 
     ctx.beginPath();
@@ -373,11 +404,6 @@ async function drawTeamLogo(
     );
 
     ctx.clip();
-
-    /*
-     * Keep the original aspect ratio.
-     * Never stretch the logo.
-     */
 
     const scale =
       Math.min(
@@ -408,10 +434,6 @@ async function drawTeamLogo(
     );
 
     ctx.restore();
-
-    /*
-     * Circular outline
-     */
 
     ctx.save();
 
@@ -724,10 +746,6 @@ async function generateTableImage(
       "2d",
     );
 
-  /*
-   * BACKGROUND
-   */
-
   ctx.fillStyle =
     "#080808";
 
@@ -738,15 +756,15 @@ async function generateTableImage(
     height,
   );
 
-  /*
-   * TOP BRANDING
-   */
+  /* =====================================================
+     TOP BRANDING
+  ===================================================== */
 
   ctx.fillStyle =
     "#ffffff";
 
   ctx.font =
-    "700 48px sans-serif";
+    '700 48px "Inter"';
 
   ctx.textAlign =
     "left";
@@ -758,7 +776,7 @@ async function generateTableImage(
   );
 
   ctx.font =
-    "700 30px sans-serif";
+    '700 30px "Inter"';
 
   ctx.fillText(
     division.name,
@@ -770,7 +788,7 @@ async function generateTableImage(
     "#aaaaaa";
 
   ctx.font =
-    "700 22px sans-serif";
+    '700 22px "Inter"';
 
   rightText(
     ctx,
@@ -783,7 +801,7 @@ async function generateTableImage(
     "#666666";
 
   ctx.font =
-    "18px sans-serif";
+    '400 18px "Inter"';
 
   rightText(
     ctx,
@@ -792,9 +810,9 @@ async function generateTableImage(
     110,
   );
 
-  /*
-   * HEADER
-   */
+  /* =====================================================
+     HEADER
+  ===================================================== */
 
   roundedRect(
     ctx,
@@ -817,7 +835,7 @@ async function generateTableImage(
     "#aaaaaa";
 
   ctx.font =
-    "700 18px sans-serif";
+    '700 18px "Inter"';
 
   centerText(
     ctx,
@@ -887,9 +905,9 @@ async function generateTableImage(
     headerY,
   );
 
-  /*
-   * NO TEAMS
-   */
+  /* =====================================================
+     NO TEAMS
+  ===================================================== */
 
   if (
     standings.length === 0
@@ -908,7 +926,7 @@ async function generateTableImage(
       "#666666";
 
     ctx.font =
-      "700 22px sans-serif";
+      '700 22px "Inter"';
 
     centerText(
       ctx,
@@ -920,9 +938,9 @@ async function generateTableImage(
     );
   }
 
-  /*
-   * ROWS
-   */
+  /* =====================================================
+     ROWS
+  ===================================================== */
 
   for (
     let index = 0;
@@ -949,10 +967,6 @@ async function generateTableImage(
       ROW_HEIGHT,
     );
 
-    /*
-     * Bottom line
-     */
-
     ctx.strokeStyle =
       "#222222";
 
@@ -975,15 +989,13 @@ async function generateTableImage(
 
     ctx.stroke();
 
-    /*
-     * POSITION
-     */
+    /* POSITION */
 
     ctx.fillStyle =
       "#dddddd";
 
     ctx.font =
-      "24px sans-serif";
+      '400 24px "Inter"';
 
     centerText(
       ctx,
@@ -997,9 +1009,7 @@ async function generateTableImage(
         8,
     );
 
-    /*
-     * LOGO
-     */
+    /* LOGO */
 
     const logoSize =
       58;
@@ -1023,15 +1033,13 @@ async function generateTableImage(
       logoSize,
     );
 
-    /*
-     * TEAM NAME
-     */
+    /* TEAM NAME */
 
     ctx.fillStyle =
       "#ffffff";
 
     ctx.font =
-      "700 25px sans-serif";
+      '700 25px "Inter"';
 
     ctx.textAlign =
       "left";
@@ -1048,15 +1056,13 @@ async function generateTableImage(
         8,
     );
 
-    /*
-     * STATS
-     */
+    /* STATS */
 
     ctx.fillStyle =
       "#dddddd";
 
     ctx.font =
-      "24px sans-serif";
+      '400 24px "Inter"';
 
     const statY =
       rowY +
@@ -1105,15 +1111,13 @@ async function generateTableImage(
       statY,
     );
 
-    /*
-     * POINTS
-     */
+    /* POINTS */
 
     ctx.fillStyle =
       "#ffffff";
 
     ctx.font =
-      "700 27px sans-serif";
+      '700 27px "Inter"';
 
     centerText(
       ctx,
@@ -1127,9 +1131,9 @@ async function generateTableImage(
     );
   }
 
-  /*
-   * FOOTER
-   */
+  /* =====================================================
+     FOOTER
+  ===================================================== */
 
   const footerY =
     BODY_START_Y +
@@ -1143,7 +1147,7 @@ async function generateTableImage(
     "#666666";
 
   ctx.font =
-    "17px sans-serif";
+    '400 17px "Inter"';
 
   ctx.textAlign =
     "left";
@@ -1386,15 +1390,6 @@ async function postOrUpdateTable(
       gameweek,
     );
 
-  /*
-   * CRITICAL:
-   *
-   * If a table record already exists,
-   * UPDATE ITS DISCORD MESSAGE.
-   *
-   * We do NOT skip it.
-   */
-
   const existing =
     await getTablePost(
       division.id,
@@ -1418,11 +1413,6 @@ async function postOrUpdateTable(
     if (updated) {
       return;
     }
-
-    /*
-     * Message disappeared from Discord.
-     * Create a replacement.
-     */
 
     console.log(
       `[TABLES] Existing message unavailable. Creating replacement.`,
@@ -1470,12 +1460,6 @@ async function checkDivision(
     `[TABLES] Checking ${division.name}`,
   );
 
-  /*
-   * ALWAYS check GW0 independently.
-   *
-   * GW0 does NOT require a gameweeks row.
-   */
-
   const standings =
     await getStandings(
       division.id,
@@ -1495,10 +1479,6 @@ async function checkDivision(
       0,
     );
   }
-
-  /*
-   * Then check actual gameweeks.
-   */
 
   const {
     data: gameweeks,
@@ -1532,12 +1512,6 @@ async function checkDivision(
     `[TABLES] ${division.name}: ${gameweeks?.length ?? 0} gameweeks found.`,
   );
 
-  /*
-   * No gameweeks is completely fine.
-   *
-   * GW0 was already handled above.
-   */
-
   if (
     !gameweeks ||
     gameweeks.length === 0
@@ -1559,12 +1533,6 @@ async function checkDivision(
     ) {
       continue;
     }
-
-    /*
-     * If the table already exists, we still
-     * need to determine whether this GW is
-     * completed before updating it.
-     */
 
     const {
       data: fixtures,
