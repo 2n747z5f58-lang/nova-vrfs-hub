@@ -13,6 +13,10 @@ import { join } from "path";
 import { fileURLToPath } from "url";
 import { supabase } from "./database.js";
 
+/* =========================
+   DESIGN
+========================= */
+
 const WIDTH = 1600;
 
 const TOP_HEIGHT = 190;
@@ -23,7 +27,8 @@ const FOOTER_HEIGHT = 70;
 const LEFT = 50;
 const RIGHT = 50;
 
-const TABLE_WIDTH = WIDTH - LEFT - RIGHT;
+const TABLE_WIDTH =
+  WIDTH - LEFT - RIGHT;
 
 const POSITION_WIDTH = 80;
 const TEAM_WIDTH = 655;
@@ -33,6 +38,10 @@ const POINTS_WIDTH = 120;
 
 const BODY_START_Y =
   TOP_HEIGHT + HEADER_HEIGHT;
+
+/* =========================
+   FONT
+========================= */
 
 const FONT_CANDIDATES = [
   fileURLToPath(
@@ -62,6 +71,8 @@ const FONT_CANDIDATES = [
 
 let FONT_FAMILY = "DejaVu Sans";
 
+let registeredFont = false;
+
 for (const fontPath of FONT_CANDIDATES) {
   if (!existsSync(fontPath)) {
     continue;
@@ -71,6 +82,8 @@ for (const fontPath of FONT_CANDIDATES) {
     registerFont(fontPath, {
       family: "DejaVu Sans",
     });
+
+    registeredFont = true;
 
     console.log(
       `[TABLES] Registered font: ${fontPath}`,
@@ -85,15 +98,15 @@ for (const fontPath of FONT_CANDIDATES) {
   }
 }
 
-if (
-  !FONT_CANDIDATES.some((fontPath) =>
-    existsSync(fontPath),
-  )
-) {
+if (!registeredFont) {
   console.log(
-    "[TABLES] DejaVuSans.ttf not found. Using system font fallback.",
+    "[TABLES] Using system font fallback.",
   );
 }
+
+/* =========================
+   TYPES
+========================= */
 
 type Standing = {
   team_id: string;
@@ -120,13 +133,6 @@ type Division = {
   status: string | null;
 };
 
-type Fixture = {
-  id: string;
-  division_id: string;
-  gameweek: number | null;
-  status: string | null;
-};
-
 type LeagueSettings = {
   league_id: string;
   table_channel_id: string | null;
@@ -137,10 +143,11 @@ type TablePost = {
   gameweek: number;
   channelId: string;
   messageId: string;
+  cycleStartedAt: string | null;
 };
 
 /* =========================
-   HELPERS
+   TEXT HELPERS
 ========================= */
 
 function getInitials(
@@ -151,7 +158,7 @@ function getInitials(
     .split(/\s+/)
     .filter(Boolean);
 
-  if (!parts.length) {
+  if (parts.length === 0) {
     return "?";
   }
 
@@ -217,20 +224,6 @@ function roundedRect(
   ctx.closePath();
 }
 
-function drawTextRight(
-  ctx: any,
-  text: string,
-  x: number,
-  y: number,
-) {
-  ctx.textAlign = "right";
-  ctx.fillText(
-    text,
-    x,
-    y,
-  );
-}
-
 function drawTextCenter(
   ctx: any,
   text: string,
@@ -245,6 +238,24 @@ function drawTextCenter(
   );
 }
 
+function drawTextRight(
+  ctx: any,
+  text: string,
+  x: number,
+  y: number,
+) {
+  ctx.textAlign = "right";
+  ctx.fillText(
+    text,
+    x,
+    y,
+  );
+}
+
+/* =========================
+   LOGOS
+========================= */
+
 async function loadTeamLogo(
   url: string | null | undefined,
 ) {
@@ -256,18 +267,20 @@ async function loadTeamLogo(
     const controller =
       new AbortController();
 
-    const timeout = setTimeout(
-      () => controller.abort(),
-      8000,
-    );
+    const timeout =
+      setTimeout(
+        () => controller.abort(),
+        8000,
+      );
 
-    const response = await fetch(
-      url,
-      {
-        signal:
-          controller.signal,
-      },
-    );
+    const response =
+      await fetch(
+        url,
+        {
+          signal:
+            controller.signal,
+        },
+      );
 
     clearTimeout(timeout);
 
@@ -280,7 +293,9 @@ async function loadTeamLogo(
         await response.arrayBuffer(),
       );
 
-    return await loadImage(buffer);
+    return await loadImage(
+      buffer,
+    );
   } catch {
     return null;
   }
@@ -289,22 +304,21 @@ async function loadTeamLogo(
 function drawFallbackBadge(
   ctx: any,
   initials: string,
-  x: number,
-  y: number,
+  centerX: number,
+  centerY: number,
   size: number,
 ) {
-  const centerX =
-    x + size / 2;
+  const radius =
+    size / 2;
 
-  const centerY =
-    y + size / 2;
+  ctx.save();
 
   ctx.beginPath();
 
   ctx.arc(
     centerX,
     centerY,
-    size / 2,
+    radius,
     0,
     Math.PI * 2,
   );
@@ -317,41 +331,165 @@ function drawFallbackBadge(
   ctx.stroke();
 
   ctx.fillStyle = "#ffffff";
+
   ctx.font =
-    `700 ${Math.round(size * 0.3)}px "${FONT_FAMILY}"`;
+    `700 ${Math.round(
+      size * 0.3,
+    )}px "${FONT_FAMILY}"`;
 
   drawTextCenter(
     ctx,
     initials,
     centerX,
-    centerY + size * 0.1,
+    centerY +
+      size * 0.1,
   );
+
+  ctx.restore();
+}
+
+async function drawTeamLogo(
+  ctx: any,
+  logoUrl: string | null | undefined,
+  teamName: string,
+  centerX: number,
+  centerY: number,
+  size: number,
+) {
+  const image =
+    await loadTeamLogo(
+      logoUrl,
+    );
+
+  if (!image) {
+    drawFallbackBadge(
+      ctx,
+      getInitials(
+        teamName,
+      ),
+      centerX,
+      centerY,
+      size,
+    );
+
+    return;
+  }
+
+  try {
+    /*
+     * The logo is clipped to a circle.
+     * This prevents square/rectangular image
+     * backgrounds from appearing in the table.
+     */
+
+    ctx.save();
+
+    ctx.beginPath();
+
+    ctx.arc(
+      centerX,
+      centerY,
+      size / 2,
+      0,
+      Math.PI * 2,
+    );
+
+    ctx.clip();
+
+    /*
+     * Contain the image while keeping its
+     * original aspect ratio.
+     */
+
+    const scale =
+      Math.min(
+        size / image.width,
+        size / image.height,
+      );
+
+    const drawWidth =
+      image.width * scale;
+
+    const drawHeight =
+      image.height * scale;
+
+    const drawX =
+      centerX -
+      drawWidth / 2;
+
+    const drawY =
+      centerY -
+      drawHeight / 2;
+
+    ctx.drawImage(
+      image,
+      drawX,
+      drawY,
+      drawWidth,
+      drawHeight,
+    );
+
+    ctx.restore();
+
+    /*
+     * Subtle circular outline.
+     */
+
+    ctx.save();
+
+    ctx.beginPath();
+
+    ctx.arc(
+      centerX,
+      centerY,
+      size / 2,
+      0,
+      Math.PI * 2,
+    );
+
+    ctx.strokeStyle =
+      "#333333";
+
+    ctx.lineWidth = 2;
+
+    ctx.stroke();
+
+    ctx.restore();
+  } catch {
+    drawFallbackBadge(
+      ctx,
+      getInitials(
+        teamName,
+      ),
+      centerX,
+      centerY,
+      size,
+    );
+  }
 }
 
 /* =========================
-   SUPABASE
+   DATABASE
 ========================= */
 
-async function getGuildSettings(
+async function getLeagueSettings(
   leagueId: string,
 ): Promise<LeagueSettings | null> {
-  console.log(
-    `[TABLES] Loading league channel settings for league ${leagueId}...`,
-  );
-
-  const { data, error } =
-    await supabase
-      .from(
-        "league_channel_settings",
-      )
-      .select(
-        "league_id, table_channel_id",
-      )
-      .eq(
-        "league_id",
-        leagueId,
-      )
-      .maybeSingle();
+  const {
+    data,
+    error,
+  } = await supabase
+    .from(
+      "league_channel_settings",
+    )
+    .select(
+      "league_id, table_channel_id",
+    )
+    .eq(
+      "league_id",
+      leagueId,
+    )
+    .maybeSingle();
 
   if (error) {
     console.error(
@@ -362,62 +500,60 @@ async function getGuildSettings(
     return null;
   }
 
-  console.log(
-    `[TABLES] League channel settings result: ${JSON.stringify(data)}`,
-  );
-
   return data as LeagueSettings | null;
 }
+
+/* =========================
+   STANDINGS
+========================= */
 
 async function getStandings(
   divisionId: string,
 ): Promise<Standing[]> {
-  console.log(
-    `[TABLES] Loading standings for division ${divisionId}...`,
-  );
-
-  const { data, error } =
-    await supabase
-      .from("standings")
-      .select(
-        `
-          team_id,
-          played,
-          wins,
-          draws,
-          losses,
-          goals_for,
-          goals_against,
-          goal_difference,
-          points,
-          teams (
-            name,
-            logo_url
-          )
-        `,
-      )
-      .eq(
-        "division_id",
-        divisionId,
-      )
-      .order(
-        "points",
-        {
-          ascending: false,
-        },
-      )
-      .order(
-        "goal_difference",
-        {
-          ascending: false,
-        },
-      )
-      .order(
-        "goals_for",
-        {
-          ascending: false,
-        },
-      );
+  const {
+    data,
+    error,
+  } = await supabase
+    .from("standings")
+    .select(
+      `
+        team_id,
+        played,
+        won,
+        drawn,
+        lost,
+        goals_for,
+        goals_against,
+        goal_difference,
+        points,
+        teams (
+          name,
+          logo_url
+        )
+      `,
+    )
+    .eq(
+      "division_id",
+      divisionId,
+    )
+    .order(
+      "points",
+      {
+        ascending: false,
+      },
+    )
+    .order(
+      "goal_difference",
+      {
+        ascending: false,
+      },
+    )
+    .order(
+      "goals_for",
+      {
+        ascending: false,
+      },
+    );
 
   if (error) {
     console.error(
@@ -428,39 +564,101 @@ async function getStandings(
     return [];
   }
 
-  console.log(
-    `[TABLES] Loaded ${data?.length ?? 0} standings rows for division ${divisionId}`,
+  return (
+    data ?? []
+  ).map(
+    (
+      row: any,
+    ) => ({
+      team_id:
+        row.team_id,
+      played:
+        Number(
+          row.played ?? 0,
+        ),
+      wins:
+        Number(
+          row.won ?? 0,
+        ),
+      draws:
+        Number(
+          row.drawn ?? 0,
+        ),
+      losses:
+        Number(
+          row.lost ?? 0,
+        ),
+      goals_for:
+        Number(
+          row.goals_for ?? 0,
+        ),
+      goals_against:
+        Number(
+          row.goals_against ?? 0,
+        ),
+      goal_difference:
+        Number(
+          row.goal_difference ??
+            0,
+        ),
+      points:
+        Number(
+          row.points ?? 0,
+        ),
+      teams:
+        row.teams ?? null,
+    }),
   );
-
-  return (data ??
-    []) as unknown as Standing[];
 }
+
+/* =========================
+   TRACKED POSTS
+========================= */
 
 async function getTablePost(
   divisionId: string,
   gameweek: number,
 ): Promise<TablePost | null> {
-  console.log(
-    `[TABLES] Checking tracked table post for division ${divisionId}, GW${gameweek}...`,
-  );
+  /*
+   * Do NOT use maybeSingle().
+   *
+   * The database already contains historical
+   * duplicate GW0 records. We only need the
+   * newest valid one.
+   */
 
-  const { data, error } =
-    await supabase
-      .from(
-        "gameweek_table_posts",
-      )
-      .select(
-        "division_id, gameweek_number, channel_id, message_id",
-      )
-      .eq(
-        "division_id",
-        divisionId,
-      )
-      .eq(
-        "gameweek_number",
-        gameweek,
-      )
-      .maybeSingle();
+  const {
+    data,
+    error,
+  } = await supabase
+    .from(
+      "gameweek_table_posts",
+    )
+    .select(
+      `
+        division_id,
+        gameweek_number,
+        channel_id,
+        message_id,
+        cycle_started_at,
+        created_at
+      `,
+    )
+    .eq(
+      "division_id",
+      divisionId,
+    )
+    .eq(
+      "gameweek_number",
+      gameweek,
+    )
+    .order(
+      "created_at",
+      {
+        ascending: false,
+      },
+    )
+    .limit(1);
 
   if (error) {
     console.error(
@@ -471,63 +669,82 @@ async function getTablePost(
     return null;
   }
 
-  if (!data) {
-    console.log(
-      `[TABLES] No tracked table post found for division ${divisionId}, GW${gameweek}`,
-    );
-
+  if (
+    !data ||
+    data.length === 0
+  ) {
     return null;
   }
 
-  console.log(
-    `[TABLES] Found tracked table post: ${data.message_id}`,
-  );
+  const row =
+    data[0];
 
   return {
     divisionId:
-      data.division_id,
+      row.division_id,
     gameweek:
-      data.gameweek_number,
+      row.gameweek_number,
     channelId:
-      data.channel_id,
+      row.channel_id,
     messageId:
-      data.message_id,
+      row.message_id,
+    cycleStartedAt:
+      row.cycle_started_at ??
+      null,
   };
 }
+
+/* =========================
+   SAVE TABLE POST
+========================= */
 
 async function saveTablePost(
   divisionId: string,
   gameweekNumber: number,
   channelId: string,
   messageId: string,
+  cycleStartedAt: string | null,
 ) {
-  console.log(
-    `[TABLES] Saving tracked table post for division ${divisionId}, GW${gameweekNumber}...`,
-  );
+  /*
+   * The real unique index is:
+   *
+   * division_id,
+   * cycle_started_at,
+   * gameweek_number
+   *
+   * However, because old rows may have
+   * different/null cycle values, we deliberately
+   * avoid an invalid onConflict here.
+   *
+   * getTablePost() already prevents duplicates.
+   */
 
-  const { error } =
-    await supabase
-      .from(
-        "gameweek_table_posts",
-      )
-      .upsert(
-        {
-          division_id:
-            divisionId,
-          gameweek_number:
-            gameweekNumber,
-          channel_id:
-            channelId,
-          message_id:
-            messageId,
-        },
-        {
-          onConflict:
-            "division_id,gameweek_number",
-        },
-      );
+  const {
+    error,
+  } = await supabase
+    .from(
+      "gameweek_table_posts",
+    )
+    .insert({
+      division_id:
+        divisionId,
+      gameweek_number:
+        gameweekNumber,
+      channel_id:
+        channelId,
+      message_id:
+        messageId,
+      cycle_started_at:
+        cycleStartedAt,
+    });
 
   if (error) {
+    /*
+     * If another watcher tick managed to insert
+     * the record at the same time, don't crash
+     * the entire watcher.
+     */
+
     console.error(
       "[TABLES] Failed to save tracked table post:",
       error,
@@ -537,12 +754,12 @@ async function saveTablePost(
   }
 
   console.log(
-    `[TABLES] Successfully saved tracked table post ${messageId}`,
+    `[TABLES] Saved table post ${messageId}`,
   );
 }
 
 /* =========================
-   IMAGE GENERATION
+   IMAGE
 ========================= */
 
 async function generateTableImage(
@@ -550,10 +767,6 @@ async function generateTableImage(
   standings: Standing[],
   gameweek: number,
 ): Promise<Buffer> {
-  console.log(
-    `[TABLES] Generating image for ${division.name}, GW${gameweek}, ${standings.length} teams...`,
-  );
-
   const height =
     TOP_HEIGHT +
     HEADER_HEIGHT +
@@ -568,9 +781,16 @@ async function generateTableImage(
     );
 
   const ctx =
-    canvas.getContext("2d");
+    canvas.getContext(
+      "2d",
+    );
 
-  ctx.fillStyle = "#080808";
+  /* =========================
+     BACKGROUND
+  ========================= */
+
+  ctx.fillStyle =
+    "#080808";
 
   ctx.fillRect(
     0,
@@ -583,11 +803,14 @@ async function generateTableImage(
      TOP
   ========================= */
 
-  ctx.fillStyle = "#ffffff";
+  ctx.fillStyle =
+    "#ffffff";
+
   ctx.font =
     `700 48px "${FONT_FAMILY}"`;
 
-  ctx.textAlign = "left";
+  ctx.textAlign =
+    "left";
 
   ctx.fillText(
     "NOVA",
@@ -604,7 +827,8 @@ async function generateTableImage(
     125,
   );
 
-  ctx.fillStyle = "#aaaaaa";
+  ctx.fillStyle =
+    "#aaaaaa";
 
   ctx.font =
     `700 22px "${FONT_FAMILY}"`;
@@ -616,7 +840,8 @@ async function generateTableImage(
     70,
   );
 
-  ctx.fillStyle = "#666666";
+  ctx.fillStyle =
+    "#666666";
 
   ctx.font =
     `18px "${FONT_FAMILY}"`;
@@ -641,112 +866,85 @@ async function generateTableImage(
     12,
   );
 
-  ctx.fillStyle = "#171717";
+  ctx.fillStyle =
+    "#171717";
+
   ctx.fill();
 
-  const columns = [
-    {
-      name: "#",
-      x:
-        LEFT +
-        POSITION_WIDTH / 2,
-      width: POSITION_WIDTH,
-    },
-    {
-      name: "TEAM",
-      x:
-        LEFT +
-        POSITION_WIDTH +
-        20,
-      width: TEAM_WIDTH,
-    },
-    {
-      name: "P",
-      x:
-        LEFT +
-        POSITION_WIDTH +
-        TEAM_WIDTH +
-        STAT_WIDTH / 2,
-      width: STAT_WIDTH,
-    },
-    {
-      name: "W",
-      x:
-        LEFT +
-        POSITION_WIDTH +
-        TEAM_WIDTH +
-        STAT_WIDTH * 1.5,
-      width: STAT_WIDTH,
-    },
-    {
-      name: "D",
-      x:
-        LEFT +
-        POSITION_WIDTH +
-        TEAM_WIDTH +
-        STAT_WIDTH * 2.5,
-      width: STAT_WIDTH,
-    },
-    {
-      name: "L",
-      x:
-        LEFT +
-        POSITION_WIDTH +
-        TEAM_WIDTH +
-        STAT_WIDTH * 3.5,
-      width: STAT_WIDTH,
-    },
-    {
-      name: "GF",
-      x:
-        LEFT +
-        POSITION_WIDTH +
-        TEAM_WIDTH +
-        STAT_WIDTH * 4.5,
-      width: STAT_WIDTH,
-    },
-    {
-      name: "GA",
-      x:
-        LEFT +
-        POSITION_WIDTH +
-        TEAM_WIDTH +
-        STAT_WIDTH * 5.5,
-      width: STAT_WIDTH,
-    },
-    {
-      name: "GD",
-      x:
-        LEFT +
-        POSITION_WIDTH +
-        TEAM_WIDTH +
-        STAT_WIDTH * 6 +
-        GOAL_DIFF_WIDTH / 2,
-      width: GOAL_DIFF_WIDTH,
-    },
-    {
-      name: "PTS",
-      x:
-        WIDTH -
-        RIGHT -
-        POINTS_WIDTH / 2,
-      width: POINTS_WIDTH,
-    },
-  ];
+  const headerY =
+    TOP_HEIGHT + 50;
 
-  ctx.fillStyle = "#aaaaaa";
+  ctx.fillStyle =
+    "#aaaaaa";
 
   ctx.font =
     `700 18px "${FONT_FAMILY}"`;
 
-  for (const column of columns) {
+  drawTextCenter(
+    ctx,
+    "#",
+    LEFT +
+      POSITION_WIDTH / 2,
+    headerY,
+  );
+
+  ctx.textAlign =
+    "left";
+
+  ctx.fillText(
+    "TEAM",
+    LEFT +
+      POSITION_WIDTH +
+      20,
+    headerY,
+  );
+
+  const statStart =
+    LEFT +
+    POSITION_WIDTH +
+    TEAM_WIDTH;
+
+  const headers = [
+    "P",
+    "W",
+    "D",
+    "L",
+    "GF",
+    "GA",
+  ];
+
+  for (
+    let i = 0;
+    i < headers.length;
+    i++
+  ) {
     drawTextCenter(
       ctx,
-      column.name,
-      column.x,
-      TOP_HEIGHT + 50,
+      headers[i],
+      statStart +
+        STAT_WIDTH * i +
+        STAT_WIDTH / 2,
+      headerY,
     );
   }
+
+  drawTextCenter(
+    ctx,
+    "GD",
+    statStart +
+      STAT_WIDTH * 6 +
+      GOAL_DIFF_WIDTH / 2,
+    headerY,
+  );
+
+  drawTextCenter(
+    ctx,
+    "PTS",
+    WIDTH -
+      RIGHT -
+      POINTS_WIDTH / 2,
+    headerY,
+  );
 
   /* =========================
      ROWS
@@ -762,7 +960,8 @@ async function generateTableImage(
 
     const rowY =
       BODY_START_Y +
-      index * ROW_HEIGHT;
+      index *
+        ROW_HEIGHT;
 
     ctx.fillStyle =
       index % 2 === 0
@@ -798,16 +997,21 @@ async function generateTableImage(
 
     ctx.stroke();
 
-    /* Position */
+    /* =========================
+       POSITION
+    ========================= */
 
-    ctx.fillStyle = "#dddddd";
+    ctx.fillStyle =
+      "#dddddd";
 
     ctx.font =
       `24px "${FONT_FAMILY}"`;
 
     drawTextCenter(
       ctx,
-      String(index + 1),
+      String(
+        index + 1,
+      ),
       LEFT +
         POSITION_WIDTH / 2,
       rowY +
@@ -815,103 +1019,56 @@ async function generateTableImage(
         8,
     );
 
-    /* Team */
-
-    const team =
-      standing.teams;
+    /* =========================
+       TEAM LOGO
+    ========================= */
 
     const teamName =
-      team?.name ??
+      standing.teams
+        ?.name ??
       "Unknown Team";
 
-    const logoSize = 58;
+    const logoSize =
+      58;
 
-    const logoX =
+    const logoCenterX =
       LEFT +
       POSITION_WIDTH +
-      18;
+      18 +
+      logoSize / 2;
 
-    const logoY =
+    const logoCenterY =
       rowY +
-      (ROW_HEIGHT -
-        logoSize) /
-        2;
+      ROW_HEIGHT / 2;
 
-    const logo =
-      await loadTeamLogo(
-        team?.logo_url,
-      );
+    await drawTeamLogo(
+      ctx,
+      standing.teams
+        ?.logo_url,
+      teamName,
+      logoCenterX,
+      logoCenterY,
+      logoSize,
+    );
 
-    if (logo) {
-      try {
-        const ratio =
-          Math.min(
-            logoSize /
-              logo.width,
-            logoSize /
-              logo.height,
-          );
+    /* =========================
+       TEAM NAME
+    ========================= */
 
-        const drawWidth =
-          logo.width *
-          ratio;
-
-        const drawHeight =
-          logo.height *
-          ratio;
-
-        const drawX =
-          logoX +
-          (logoSize -
-            drawWidth) /
-            2;
-
-        const drawY =
-          logoY +
-          (logoSize -
-            drawHeight) /
-            2;
-
-        ctx.drawImage(
-          logo,
-          drawX,
-          drawY,
-          drawWidth,
-          drawHeight,
-        );
-      } catch {
-        drawFallbackBadge(
-          ctx,
-          getInitials(
-            teamName,
-          ),
-          logoX,
-          logoY,
-          logoSize,
-        );
-      }
-    } else {
-      drawFallbackBadge(
-        ctx,
-        getInitials(
-          teamName,
-        ),
-        logoX,
-        logoY,
-        logoSize,
-      );
-    }
-
-    ctx.fillStyle = "#ffffff";
+    ctx.fillStyle =
+      "#ffffff";
 
     ctx.font =
       `700 25px "${FONT_FAMILY}"`;
 
-    ctx.textAlign = "left";
+    ctx.textAlign =
+      "left";
 
     ctx.fillText(
       teamName,
-      logoX +
+      LEFT +
+        POSITION_WIDTH +
+        18 +
         logoSize +
         20,
       rowY +
@@ -919,9 +1076,12 @@ async function generateTableImage(
         8,
     );
 
-    /* Stats */
+    /* =========================
+       STATS
+    ========================= */
 
-    ctx.fillStyle = "#dddddd";
+    ctx.fillStyle =
+      "#dddddd";
 
     ctx.font =
       `24px "${FONT_FAMILY}"`;
@@ -931,7 +1091,7 @@ async function generateTableImage(
       ROW_HEIGHT / 2 +
       8;
 
-    const statValues = [
+    const values = [
       standing.played,
       standing.wins,
       standing.draws,
@@ -941,32 +1101,23 @@ async function generateTableImage(
     ];
 
     for (
-      let statIndex = 0;
-      statIndex <
-        statValues.length;
-      statIndex++
+      let i = 0;
+      i < values.length;
+      i++
     ) {
-      const x =
-        LEFT +
-        POSITION_WIDTH +
-        TEAM_WIDTH +
-        STAT_WIDTH *
-          statIndex +
-        STAT_WIDTH / 2;
-
       drawTextCenter(
         ctx,
         String(
-          statValues[
-            statIndex
-          ] ?? 0,
+          values[i] ?? 0,
         ),
-        x,
+        statStart +
+          STAT_WIDTH * i +
+          STAT_WIDTH / 2,
         statY,
       );
     }
 
-    let gd =
+    const gd =
       standing.goal_difference ??
       0;
 
@@ -978,15 +1129,18 @@ async function generateTableImage(
     drawTextCenter(
       ctx,
       gdText,
-      LEFT +
-        POSITION_WIDTH +
-        TEAM_WIDTH +
+      statStart +
         STAT_WIDTH * 6 +
         GOAL_DIFF_WIDTH / 2,
       statY,
     );
 
-    ctx.fillStyle = "#ffffff";
+    /* =========================
+       POINTS
+    ========================= */
+
+    ctx.fillStyle =
+      "#ffffff";
 
     ctx.font =
       `700 27px "${FONT_FAMILY}"`;
@@ -1012,12 +1166,14 @@ async function generateTableImage(
     standings.length *
       ROW_HEIGHT;
 
-  ctx.fillStyle = "#666666";
+  ctx.fillStyle =
+    "#666666";
 
   ctx.font =
     `17px "${FONT_FAMILY}"`;
 
-  ctx.textAlign = "left";
+  ctx.textAlign =
+    "left";
 
   ctx.fillText(
     "Generated automatically by NOVA",
@@ -1030,10 +1186,6 @@ async function generateTableImage(
     `${standings.length} TEAM(S)`,
     WIDTH - RIGHT,
     footerY + 44,
-  );
-
-  console.log(
-    `[TABLES] Image generated successfully for ${division.name}, GW${gameweek}`,
   );
 
   return canvas.toBuffer(
@@ -1050,21 +1202,40 @@ async function postTable(
   division: Division,
   standings: Standing[],
   gameweekNumber: number,
+  cycleStartedAt: string | null,
 ) {
-  console.log(
-    `[TABLES] ===== POST TABLE START: ${division.name} GW${gameweekNumber} =====`,
-  );
+  /*
+   * FINAL SAFETY CHECK
+   *
+   * Never post if we already have a tracked
+   * table for this division/gameweek.
+   */
+
+  const alreadyPosted =
+    await getTablePost(
+      division.id,
+      gameweekNumber,
+    );
+
+  if (alreadyPosted) {
+    console.log(
+      `[TABLES] ${division.name} GW${gameweekNumber} already posted. Skipping duplicate.`,
+    );
+
+    return;
+  }
 
   const leagueSettings =
-    await getGuildSettings(
+    await getLeagueSettings(
       division.league_id,
     );
 
   if (
-    !leagueSettings?.table_channel_id
+    !leagueSettings ||
+    !leagueSettings.table_channel_id
   ) {
     console.error(
-      `[TABLES] No table channel configured for league ${division.league_id}`,
+      `[TABLES] No table channel configured for ${division.name}`,
     );
 
     return;
@@ -1080,7 +1251,19 @@ async function postTable(
     !channel.isTextBased()
   ) {
     console.error(
-      `[TABLES] Table channel ${leagueSettings.table_channel_id} is unavailable or not text based.`,
+      `[TABLES] Table channel ${leagueSettings.table_channel_id} is unavailable.`,
+    );
+
+    return;
+  }
+
+  /*
+   * Don't generate/post a blank table.
+   */
+
+  if (standings.length === 0) {
+    console.log(
+      `[TABLES] ${division.name} has 0 standings rows. Not posting blank table.`,
     );
 
     return;
@@ -1097,7 +1280,8 @@ async function postTable(
     new AttachmentBuilder(
       image,
       {
-        name: `nova-table-${division.id}-gw${gameweekNumber}.png`,
+        name:
+          `nova-table-${division.id}-gw${gameweekNumber}.png`,
       },
     );
 
@@ -1105,27 +1289,30 @@ async function postTable(
     await (
       channel as TextChannel
     ).send({
-      files: [attachment],
+      files: [
+        attachment,
+      ],
     });
 
   console.log(
-    `[TABLES] Discord table posted successfully. Message ${message.id}`,
+    `[TABLES] Discord table posted successfully: ${message.id}`,
   );
+
+  /*
+   * Record it immediately.
+   */
 
   await saveTablePost(
     division.id,
     gameweekNumber,
     leagueSettings.table_channel_id,
     message.id,
-  );
-
-  console.log(
-    `[TABLES] ===== POST TABLE END: ${division.name} GW${gameweekNumber} =====`,
+    cycleStartedAt,
   );
 }
 
 /* =========================
-   GAMEWEEK CHECKING
+   DIVISION
 ========================= */
 
 async function checkDivision(
@@ -1133,20 +1320,23 @@ async function checkDivision(
   division: Division,
 ) {
   console.log(
-    `[TABLES] >>> Checking division ${division.name} (${division.id}) status=${division.status}`,
+    `[TABLES] Checking ${division.name}`,
   );
 
-  const standings =
+  /*
+   * ========================
+   * GW0
+   * ========================
+   */
+
+  let standings =
     await getStandings(
       division.id,
     );
 
-  console.log(
-    `[TABLES] ${division.name}: ${standings.length} standings rows loaded.`,
-  );
-
   /*
-   * GW0 is the initial league table.
+   * GW0 is only posted when actual teams
+   * exist in the standings.
    */
 
   const existingGW0 =
@@ -1156,29 +1346,28 @@ async function checkDivision(
     );
 
   if (!existingGW0) {
-    console.log(
-      `[TABLES] ${division.name}: GW0 does not exist. Posting initial table...`,
-    );
-
-    await postTable(
-      client,
-      division,
-      standings,
-      0,
-    );
-  } else {
-    console.log(
-      `[TABLES] ${division.name}: GW0 already exists as ${existingGW0.messageId}`,
-    );
+    if (
+      standings.length > 0
+    ) {
+      await postTable(
+        client,
+        division,
+        standings,
+        0,
+        null,
+      );
+    } else {
+      console.log(
+        `[TABLES] ${division.name}: no standings yet, so GW0 will wait.`,
+      );
+    }
   }
 
-  /* =========================
-     LOAD GAMEWEEKS
-  ========================= */
-
-  console.log(
-    `[TABLES] ${division.name}: Loading gameweeks...`,
-  );
+  /*
+   * ========================
+   * GAMEWEEKS
+   * ========================
+   */
 
   const {
     data: gameweeks,
@@ -1209,7 +1398,7 @@ async function checkDivision(
   }
 
   console.log(
-    `[TABLES] ${division.name}: Found ${gameweeks?.length ?? 0} gameweeks.`,
+    `[TABLES] ${division.name}: ${gameweeks?.length ?? 0} gameweeks found.`,
   );
 
   for (
@@ -1226,23 +1415,23 @@ async function checkDivision(
       continue;
     }
 
-    const tracked =
+    /*
+     * Already posted?
+     */
+
+    const existing =
       await getTablePost(
         division.id,
         number,
       );
 
-    if (tracked) {
-      console.log(
-        `[TABLES] ${division.name}: GW${number} already posted, skipping.`,
-      );
-
+    if (existing) {
       continue;
     }
 
-    console.log(
-      `[TABLES] ${division.name}: Checking fixtures for GW${number}...`,
-    );
+    /*
+     * Find fixtures.
+     */
 
     const {
       data: fixtures,
@@ -1270,52 +1459,76 @@ async function checkDivision(
       break;
     }
 
-    console.log(
-      `[TABLES] ${division.name}: GW${number} has ${fixtures?.length ?? 0} fixtures.`,
-    );
-
     if (
       !fixtures ||
       fixtures.length === 0
     ) {
       console.log(
-        `[TABLES] ${division.name}: GW${number} has no fixtures yet. Stopping here.`,
+        `[TABLES] ${division.name} GW${number}: no fixtures yet.`,
       );
 
       break;
     }
 
+    /*
+     * Every fixture must be completed.
+     */
+
     const incomplete =
       fixtures.some(
-        (fixture: {
-          status: string | null;
-        }) =>
+        (
+          fixture: {
+            status:
+              | string
+              | null;
+          },
+        ) =>
           fixture.status !==
           "completed",
       );
 
     if (incomplete) {
       console.log(
-        `[TABLES] ${division.name}: GW${number} is not complete yet. Stopping here.`,
+        `[TABLES] ${division.name} GW${number}: not complete yet.`,
       );
 
       break;
     }
 
-    console.log(
-      `[TABLES] ${division.name}: GW${number} is COMPLETE. Posting table...`,
-    );
+    /*
+     * Completed gameweek.
+     */
 
-    const updatedStandings =
+    standings =
       await getStandings(
         division.id,
       );
 
+    if (
+      standings.length === 0
+    ) {
+      console.log(
+        `[TABLES] ${division.name} GW${number}: no standings rows, skipping.`,
+      );
+
+      break;
+    }
+
+    /*
+     * Use the gameweek start as the cycle
+     * identifier when available.
+     */
+
+    const cycleStartedAt =
+      gameweek.starts_at ??
+      null;
+
     await postTable(
       client,
       division,
-      updatedStandings,
+      standings,
       number,
+      cycleStartedAt,
     );
   }
 }
@@ -1328,15 +1541,7 @@ async function checkGameweekTables(
   client: Client,
 ) {
   console.log(
-    "[TABLES] ========================================",
-  );
-
-  console.log(
-    "[TABLES] checkGameweekTables() STARTED",
-  );
-
-  console.log(
-    "[TABLES] Loading active/running divisions...",
+    "[TABLES] Checking gameweek tables...",
   );
 
   const {
@@ -1364,55 +1569,19 @@ async function checkGameweekTables(
     return;
   }
 
-  console.log(
-    `[TABLES] Active/running divisions found: ${divisions?.length ?? 0}`,
-  );
-
   if (
     !divisions ||
     divisions.length === 0
   ) {
     console.log(
-      "[TABLES] NO ACTIVE/RUNNING DIVISIONS FOUND. Nothing to generate.",
+      "[TABLES] No active/running divisions.",
     );
-
-    /*
-     * Diagnostic only:
-     * Load all statuses so we can see what the database
-     * actually contains.
-     */
-
-    const {
-      data: allDivisions,
-      error: allDivisionsError,
-    } = await supabase
-      .from("divisions")
-      .select(
-        "id, name, status",
-      );
-
-    if (allDivisionsError) {
-      console.error(
-        "[TABLES] Failed to load all division statuses:",
-        allDivisionsError,
-      );
-    } else {
-      console.log(
-        "[TABLES] ALL DIVISION STATUSES:",
-        allDivisions,
-      );
-    }
 
     return;
   }
 
   for (const division of
-    (divisions ??
-      []) as unknown as Division[]) {
-    console.log(
-      `[TABLES] Starting division: ${division.name} | status=${division.status} | id=${division.id}`,
-    );
-
+    divisions as unknown as Division[]) {
     try {
       await checkDivision(
         client,
@@ -1425,14 +1594,6 @@ async function checkGameweekTables(
       );
     }
   }
-
-  console.log(
-    "[TABLES] checkGameweekTables() FINISHED",
-  );
-
-  console.log(
-    "[TABLES] ========================================",
-  );
 }
 
 /* =========================
@@ -1443,38 +1604,33 @@ export function startGameweekTableWatcher(
   client: Client,
 ) {
   console.log(
-    "[TABLES] ========================================",
-  );
-
-  console.log(
-    "[TABLES] GAMEWEEK TABLE WATCHER STARTING",
-  );
-
-  console.log(
-    "[TABLES] Running initial table check NOW...",
+    "[TABLES] Gameweek table watcher started.",
   );
 
   void checkGameweekTables(
     client,
-  ).catch((error) => {
-    console.error(
-      "[TABLES] Initial table check crashed:",
-      error,
-    );
-  });
-
-  setInterval(() => {
-    console.log(
-      "[TABLES] 30-second table watcher tick...",
-    );
-
-    void checkGameweekTables(
-      client,
-    ).catch((error) => {
+  ).catch(
+    (error) => {
       console.error(
-        "[TABLES] Scheduled table check crashed:",
+        "[TABLES] Initial table check crashed:",
         error,
       );
-    });
-  }, 30_000);
+    },
+  );
+
+  setInterval(
+    () => {
+      void checkGameweekTables(
+        client,
+      ).catch(
+        (error) => {
+          console.error(
+            "[TABLES] Scheduled table check crashed:",
+            error,
+          );
+        },
+      );
+    },
+    30_000,
+  );
 }
