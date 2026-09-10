@@ -354,7 +354,7 @@ async function getStandings(
     return [];
   }
 
-  return (data ?? []) as Standing[];
+  return (data ?? []) as unknown as Standing[];
 }
 
 function buildTable(
@@ -1484,7 +1484,7 @@ export async function checkGameweekTables(
   }
 
   for (const division of
-    (divisions ?? []) as Division[]) {
+    (divisions ?? []) as unknown as Division[]
     try {
       await checkDivision(
         client,
