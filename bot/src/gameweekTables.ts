@@ -1,71 +1,17 @@
 import {
   AttachmentBuilder,
-  ChannelType,
   Client,
+  TextChannel,
 } from "discord.js";
-
 import {
   createCanvas,
   loadImage,
   registerFont,
-  type Image,
 } from "canvas";
-
 import { existsSync } from "fs";
 import { join } from "path";
 import { fileURLToPath } from "url";
-
 import { supabase } from "./database.js";
-
-type Division = {
-  id: string;
-  league_id: string;
-  name: string;
-  tier: number;
-  season: string | null;
-  status: string;
-  gameweek_interval_days: number;
-};
-
-type Team = {
-  id: string;
-  name: string;
-  logo_url: string | null;
-  division_id: string;
-};
-
-type Standing = {
-  team_id: string;
-  played: number;
-  wins: number;
-  draws: number;
-  losses: number;
-  goals_for: number;
-  goals_against: number;
-  goal_difference: number;
-  points: number;
-};
-
-type TableRow = {
-  position: number;
-  team: Team;
-  played: number;
-  wins: number;
-  draws: number;
-  losses: number;
-  goalsFor: number;
-  goalsAgainst: number;
-  goalDifference: number;
-  points: number;
-};
-
-type TrackedPost = {
-  id: string;
-  division_id: string;
-  gameweek: number;
-  channel_id: string;
-  message_id: string;
-};
 
 const WIDTH = 1600;
 
@@ -81,14 +27,12 @@ const TABLE_WIDTH = WIDTH - LEFT - RIGHT;
 
 const POSITION_WIDTH = 80;
 const TEAM_WIDTH = 655;
-
 const STAT_WIDTH = 90;
 const GOAL_DIFF_WIDTH = 105;
 const POINTS_WIDTH = 120;
 
-const BODY_START_Y = TOP_HEIGHT + HEADER_HEIGHT;
-
-const FONT_FAMILY = "DejaVu Sans";
+const BODY_START_Y =
+  TOP_HEIGHT + HEADER_HEIGHT;
 
 const FONT_CANDIDATES = [
   fileURLToPath(
@@ -116,7 +60,7 @@ const FONT_CANDIDATES = [
   ),
 ];
 
-let registeredFont = false;
+let FONT_FAMILY = "DejaVu Sans";
 
 for (const fontPath of FONT_CANDIDATES) {
   if (!existsSync(fontPath)) {
@@ -125,12 +69,8 @@ for (const fontPath of FONT_CANDIDATES) {
 
   try {
     registerFont(fontPath, {
-      family: FONT_FAMILY,
-      weight: "normal",
-      style: "normal",
+      family: "DejaVu Sans",
     });
-
-    registeredFont = true;
 
     console.log(
       `[TABLES] Registered font: ${fontPath}`,
@@ -145,30 +85,86 @@ for (const fontPath of FONT_CANDIDATES) {
   }
 }
 
-if (!registeredFont) {
-  console.warn(
+if (
+  !FONT_CANDIDATES.some((fontPath) =>
+    existsSync(fontPath),
+  )
+) {
+  console.log(
     "[TABLES] DejaVuSans.ttf not found. Using system font fallback.",
   );
 }
 
-function truncateText(
-  text: string,
-  maxLength: number,
-): string {
-  const value = String(text ?? "");
+type Standing = {
+  team_id: string;
+  played: number;
+  wins: number;
+  draws: number;
+  losses: number;
+  goals_for: number;
+  goals_against: number;
+  goal_difference: number;
+  points: number;
+  teams?: {
+    name?: string | null;
+    logo_url?: string | null;
+  } | null;
+};
 
-  if (value.length <= maxLength) {
-    return value;
+type Division = {
+  id: string;
+  league_id: string;
+  name: string;
+  tier: number | null;
+  season: string | null;
+  status: string | null;
+};
+
+type Fixture = {
+  id: string;
+  division_id: string;
+  gameweek: number | null;
+  status: string | null;
+};
+
+type LeagueSettings = {
+  league_id: string;
+  table_channel_id: string | null;
+};
+
+type TablePost = {
+  divisionId: string;
+  gameweek: number;
+  channelId: string;
+  messageId: string;
+};
+
+/* =========================
+   HELPERS
+========================= */
+
+function getInitials(
+  name: string,
+): string {
+  const parts = name
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (!parts.length) {
+    return "?";
   }
 
-  return `${value.slice(0, maxLength - 1)}…`;
-}
+  if (parts.length === 1) {
+    return parts[0]
+      .slice(0, 2)
+      .toUpperCase();
+  }
 
-function getFont(
-  size: number,
-  weight: "normal" | "bold" = "normal",
-): string {
-  return `${weight} ${size}px "${FONT_FAMILY}"`;
+  return (
+    parts[0][0] +
+    parts[parts.length - 1][0]
+  ).toUpperCase();
 }
 
 function roundedRect(
@@ -179,85 +175,55 @@ function roundedRect(
   height: number,
   radius: number,
 ) {
-  const r = Math.min(
-    radius,
-    width / 2,
-    height / 2,
-  );
-
   ctx.beginPath();
 
-  ctx.moveTo(x + r, y);
-
-  ctx.lineTo(
-    x + width - r,
+  ctx.moveTo(
+    x + radius,
     y,
   );
 
-  ctx.quadraticCurveTo(
+  ctx.arcTo(
     x + width,
     y,
     x + width,
-    y + r,
+    y + height,
+    radius,
   );
 
-  ctx.lineTo(
-    x + width,
-    y + height - r,
-  );
-
-  ctx.quadraticCurveTo(
+  ctx.arcTo(
     x + width,
     y + height,
-    x + width - r,
-    y + height,
-  );
-
-  ctx.lineTo(
-    x + r,
-    y + height,
-  );
-
-  ctx.quadraticCurveTo(
     x,
     y + height,
-    x,
-    y + height - r,
+    radius,
   );
 
-  ctx.lineTo(
+  ctx.arcTo(
     x,
-    y + r,
-  );
-
-  ctx.quadraticCurveTo(
+    y + height,
     x,
     y,
-    x + r,
+    radius,
+  );
+
+  ctx.arcTo(
+    x,
     y,
+    x + width,
+    y,
+    radius,
   );
 
   ctx.closePath();
 }
 
-function drawText(
+function drawTextRight(
   ctx: any,
   text: string,
   x: number,
   y: number,
-  size: number,
-  color: string,
-  weight: "normal" | "bold" = "normal",
-  align:
-    | "left"
-    | "center"
-    | "right" = "left",
 ) {
-  ctx.font = getFont(size, weight);
-  ctx.fillStyle = color;
-  ctx.textAlign = align;
-  ctx.textBaseline = "middle";
-
+  ctx.textAlign = "right";
   ctx.fillText(
     text,
     x,
@@ -265,164 +231,24 @@ function drawText(
   );
 }
 
-async function getGuildSettings(
-  leagueId: string,
+function drawTextCenter(
+  ctx: any,
+  text: string,
+  x: number,
+  y: number,
 ) {
-  const { data, error } =
-    await supabase
-      .from("league_channel_settings")
-      .select("*")
-      .eq(
-        "league_id",
-        leagueId,
-      )
-      .maybeSingle();
-
-  if (error) {
-    console.error(
-      "[TABLES] Failed to load league channel settings:",
-      error,
-    );
-  }
-
-  return data;
+  ctx.textAlign = "center";
+  ctx.fillText(
+    text,
+    x,
+    y,
+  );
 }
 
-async function getTeams(
-  divisionId: string,
-): Promise<Team[]> {
-  const { data, error } =
-    await supabase
-      .from("teams")
-      .select(
-        "id,name,logo_url,division_id",
-      )
-      .eq(
-        "division_id",
-        divisionId,
-      )
-      .order("name", {
-        ascending: true,
-      });
-
-  if (error) {
-    console.error(
-      "[TABLES] Failed to load teams:",
-      error,
-    );
-
-    return [];
-  }
-
-  return (data ?? []) as Team[];
-}
-
-async function getStandings(
-  divisionId: string,
-): Promise<Standing[]> {
-  const { data, error } =
-    await supabase
-      .from("standings")
-      .select(
-        [
-          "team_id",
-          "played",
-          "wins",
-          "draws",
-          "losses",
-          "goals_for",
-          "goals_against",
-          "goal_difference",
-          "points",
-        ].join(","),
-      )
-      .eq(
-        "division_id",
-        divisionId,
-      );
-
-  if (error) {
-    console.error(
-      "[TABLES] Failed to load standings:",
-      error,
-    );
-
-    return [];
-  }
-
-  return (data ?? []) as unknown as Standing[];
-}
-
-function buildTable(
-  teams: Team[],
-  standings: Standing[],
-): TableRow[] {
-  const standingsByTeam =
-    new Map<string, Standing>();
-
-  for (const standing of standings) {
-    standingsByTeam.set(
-      standing.team_id,
-      standing,
-    );
-  }
-
-  const rows = teams.map((team) => {
-    const standing =
-      standingsByTeam.get(team.id);
-
-    return {
-      position: 0,
-      team,
-      played: standing?.played ?? 0,
-      wins: standing?.wins ?? 0,
-      draws: standing?.draws ?? 0,
-      losses: standing?.losses ?? 0,
-      goalsFor:
-        standing?.goals_for ?? 0,
-      goalsAgainst:
-        standing?.goals_against ?? 0,
-      goalDifference:
-        standing?.goal_difference ?? 0,
-      points: standing?.points ?? 0,
-    };
-  });
-
-  rows.sort((a, b) => {
-    if (b.points !== a.points) {
-      return b.points - a.points;
-    }
-
-    if (
-      b.goalDifference !==
-      a.goalDifference
-    ) {
-      return (
-        b.goalDifference -
-        a.goalDifference
-      );
-    }
-
-    if (b.goalsFor !== a.goalsFor) {
-      return b.goalsFor - a.goalsFor;
-    }
-
-    return a.team.name.localeCompare(
-      b.team.name,
-    );
-  });
-
-  rows.forEach((row, index) => {
-    row.position = index + 1;
-  });
-
-  return rows;
-}
-
-async function downloadLogo(
-  logoUrl: string | null,
-): Promise<Image | null> {
-  if (!logoUrl) {
+async function loadTeamLogo(
+  url: string | null | undefined,
+) {
+  if (!url) {
     return null;
   }
 
@@ -436,19 +262,16 @@ async function downloadLogo(
     );
 
     const response = await fetch(
-      logoUrl,
+      url,
       {
-        signal: controller.signal,
+        signal:
+          controller.signal,
       },
     );
 
     clearTimeout(timeout);
 
     if (!response.ok) {
-      console.warn(
-        `[TABLES] Logo request failed: ${response.status}`,
-      );
-
       return null;
     }
 
@@ -457,24 +280,15 @@ async function downloadLogo(
         await response.arrayBuffer(),
       );
 
-    if (!buffer.length) {
-      return null;
-    }
-
     return await loadImage(buffer);
-  } catch (error) {
-    console.warn(
-      "[TABLES] Failed to load team logo:",
-      error,
-    );
-
+  } catch {
     return null;
   }
 }
 
 function drawFallbackBadge(
   ctx: any,
-  teamName: string,
+  initials: string,
   x: number,
   y: number,
   size: number,
@@ -485,14 +299,12 @@ function drawFallbackBadge(
   const centerY =
     y + size / 2;
 
-  const radius = size / 2;
-
   ctx.beginPath();
 
   ctx.arc(
     centerX,
     centerY,
-    radius,
+    size / 2,
     0,
     Math.PI * 2,
   );
@@ -500,124 +312,260 @@ function drawFallbackBadge(
   ctx.fillStyle = "#252525";
   ctx.fill();
 
-  ctx.lineWidth = 2;
   ctx.strokeStyle = "#555555";
+  ctx.lineWidth = 2;
   ctx.stroke();
 
-  const initials =
-    teamName
-      .trim()
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map(
-        (part) =>
-          part[0]?.toUpperCase() ?? "",
-      )
-      .join("") || "?";
+  ctx.fillStyle = "#ffffff";
+  ctx.font =
+    `700 ${Math.round(size * 0.3)}px "${FONT_FAMILY}"`;
 
-  drawText(
+  drawTextCenter(
     ctx,
     initials,
     centerX,
-    centerY,
-    Math.max(
-      18,
-      Math.floor(size * 0.28),
-    ),
-    "#ffffff",
-    "bold",
-    "center",
+    centerY + size * 0.1,
   );
 }
 
-function drawLogo(
-  ctx: any,
-  image: Image | null,
-  teamName: string,
-  x: number,
-  y: number,
-  size: number,
+/* =========================
+   SUPABASE
+========================= */
+
+async function getGuildSettings(
+  leagueId: string,
+): Promise<LeagueSettings | null> {
+  console.log(
+    `[TABLES] Loading league channel settings for league ${leagueId}...`,
+  );
+
+  const { data, error } =
+    await supabase
+      .from(
+        "league_channel_settings",
+      )
+      .select(
+        "league_id, table_channel_id",
+      )
+      .eq(
+        "league_id",
+        leagueId,
+      )
+      .maybeSingle();
+
+  if (error) {
+    console.error(
+      "[TABLES] Failed to load league channel settings:",
+      error,
+    );
+
+    return null;
+  }
+
+  console.log(
+    `[TABLES] League channel settings result: ${JSON.stringify(data)}`,
+  );
+
+  return data as LeagueSettings | null;
+}
+
+async function getStandings(
+  divisionId: string,
+): Promise<Standing[]> {
+  console.log(
+    `[TABLES] Loading standings for division ${divisionId}...`,
+  );
+
+  const { data, error } =
+    await supabase
+      .from("standings")
+      .select(
+        `
+          team_id,
+          played,
+          wins,
+          draws,
+          losses,
+          goals_for,
+          goals_against,
+          goal_difference,
+          points,
+          teams (
+            name,
+            logo_url
+          )
+        `,
+      )
+      .eq(
+        "division_id",
+        divisionId,
+      )
+      .order(
+        "points",
+        {
+          ascending: false,
+        },
+      )
+      .order(
+        "goal_difference",
+        {
+          ascending: false,
+        },
+      )
+      .order(
+        "goals_for",
+        {
+          ascending: false,
+        },
+      );
+
+  if (error) {
+    console.error(
+      "[TABLES] Failed to load standings:",
+      error,
+    );
+
+    return [];
+  }
+
+  console.log(
+    `[TABLES] Loaded ${data?.length ?? 0} standings rows for division ${divisionId}`,
+  );
+
+  return (data ??
+    []) as unknown as Standing[];
+}
+
+async function getTablePost(
+  divisionId: string,
+  gameweek: number,
+): Promise<TablePost | null> {
+  console.log(
+    `[TABLES] Checking tracked table post for division ${divisionId}, GW${gameweek}...`,
+  );
+
+  const { data, error } =
+    await supabase
+      .from(
+        "gameweek_table_posts",
+      )
+      .select(
+        "division_id, gameweek_number, channel_id, message_id",
+      )
+      .eq(
+        "division_id",
+        divisionId,
+      )
+      .eq(
+        "gameweek_number",
+        gameweek,
+      )
+      .maybeSingle();
+
+  if (error) {
+    console.error(
+      "[TABLES] Failed to load tracked table post:",
+      error,
+    );
+
+    return null;
+  }
+
+  if (!data) {
+    console.log(
+      `[TABLES] No tracked table post found for division ${divisionId}, GW${gameweek}`,
+    );
+
+    return null;
+  }
+
+  console.log(
+    `[TABLES] Found tracked table post: ${data.message_id}`,
+  );
+
+  return {
+    divisionId:
+      data.division_id,
+    gameweek:
+      data.gameweek_number,
+    channelId:
+      data.channel_id,
+    messageId:
+      data.message_id,
+  };
+}
+
+async function saveTablePost(
+  divisionId: string,
+  gameweekNumber: number,
+  channelId: string,
+  messageId: string,
 ) {
-  if (!image) {
-    drawFallbackBadge(
-      ctx,
-      teamName,
-      x,
-      y,
-      size,
+  console.log(
+    `[TABLES] Saving tracked table post for division ${divisionId}, GW${gameweekNumber}...`,
+  );
+
+  const { error } =
+    await supabase
+      .from(
+        "gameweek_table_posts",
+      )
+      .upsert(
+        {
+          division_id:
+            divisionId,
+          gameweek_number:
+            gameweekNumber,
+          channel_id:
+            channelId,
+          message_id:
+            messageId,
+        },
+        {
+          onConflict:
+            "division_id,gameweek_number",
+        },
+      );
+
+  if (error) {
+    console.error(
+      "[TABLES] Failed to save tracked table post:",
+      error,
     );
 
     return;
   }
 
-  try {
-    const naturalWidth =
-      image.width ||
-      image.naturalWidth ||
-      1;
-
-    const naturalHeight =
-      image.height ||
-      image.naturalHeight ||
-      1;
-
-    const scale = Math.min(
-      size / naturalWidth,
-      size / naturalHeight,
-    );
-
-    const drawWidth =
-      naturalWidth * scale;
-
-    const drawHeight =
-      naturalHeight * scale;
-
-    const drawX =
-      x + (size - drawWidth) / 2;
-
-    const drawY =
-      y + (size - drawHeight) / 2;
-
-    ctx.imageSmoothingEnabled = true;
-
-    ctx.drawImage(
-      image,
-      drawX,
-      drawY,
-      drawWidth,
-      drawHeight,
-    );
-  } catch (error) {
-    console.warn(
-      `[TABLES] Failed to draw logo for ${teamName}:`,
-      error,
-    );
-
-    drawFallbackBadge(
-      ctx,
-      teamName,
-      x,
-      y,
-      size,
-    );
-  }
+  console.log(
+    `[TABLES] Successfully saved tracked table post ${messageId}`,
+  );
 }
 
-async function generateTablePng(
+/* =========================
+   IMAGE GENERATION
+========================= */
+
+async function generateTableImage(
   division: Division,
-  rows: TableRow[],
+  standings: Standing[],
+  gameweek: number,
 ): Promise<Buffer> {
+  console.log(
+    `[TABLES] Generating image for ${division.name}, GW${gameweek}, ${standings.length} teams...`,
+  );
+
   const height =
     TOP_HEIGHT +
     HEADER_HEIGHT +
-    rows.length * ROW_HEIGHT +
+    standings.length *
+      ROW_HEIGHT +
     FOOTER_HEIGHT;
 
-  const canvas = createCanvas(
-    WIDTH,
-    height,
-  );
+  const canvas =
+    createCanvas(
+      WIDTH,
+      height,
+    );
 
   const ctx =
     canvas.getContext("2d");
@@ -631,79 +579,58 @@ async function generateTablePng(
     height,
   );
 
-  drawText(
-    ctx,
+  /* =========================
+     TOP
+  ========================= */
+
+  ctx.fillStyle = "#ffffff";
+  ctx.font =
+    `700 48px "${FONT_FAMILY}"`;
+
+  ctx.textAlign = "left";
+
+  ctx.fillText(
     "NOVA",
     LEFT,
     70,
-    48,
-    "#ffffff",
-    "bold",
-    "left",
   );
 
-  drawText(
-    ctx,
+  ctx.font =
+    `700 30px "${FONT_FAMILY}"`;
+
+  ctx.fillText(
     division.name,
     LEFT,
     125,
-    30,
-    "#ffffff",
-    "bold",
-    "left",
   );
 
-  drawText(
+  ctx.fillStyle = "#aaaaaa";
+
+  ctx.font =
+    `700 22px "${FONT_FAMILY}"`;
+
+  drawTextRight(
     ctx,
     "LEAGUE TABLE",
     WIDTH - RIGHT,
     70,
-    22,
-    "#aaaaaa",
-    "bold",
-    "right",
   );
 
-  drawText(
+  ctx.fillStyle = "#666666";
+
+  ctx.font =
+    `18px "${FONT_FAMILY}"`;
+
+  drawTextRight(
     ctx,
     "VRFS • NOVA",
     WIDTH - RIGHT,
     110,
-    18,
-    "#666666",
-    "normal",
-    "right",
   );
 
-  const positionX = LEFT;
-
-  const teamX =
-    positionX + POSITION_WIDTH;
-
-  const playedX =
-    teamX + TEAM_WIDTH;
-
-  const winsX =
-    playedX + STAT_WIDTH;
-
-  const drawsX =
-    winsX + STAT_WIDTH;
-
-  const lossesX =
-    drawsX + STAT_WIDTH;
-
-  const goalsForX =
-    lossesX + STAT_WIDTH;
-
-  const goalsAgainstX =
-    goalsForX + STAT_WIDTH;
-
-  const goalDifferenceX =
-    goalsAgainstX + STAT_WIDTH;
-
-  const pointsX =
-    goalDifferenceX +
-    GOAL_DIFF_WIDTH;
+  /* =========================
+     HEADER
+  ========================= */
 
   roundedRect(
     ctx,
@@ -717,118 +644,123 @@ async function generateTablePng(
   ctx.fillStyle = "#171717";
   ctx.fill();
 
-  const headerCenterY =
-    TOP_HEIGHT +
-    HEADER_HEIGHT / 2;
-
-  drawText(
-    ctx,
-    "#",
-    positionX +
-      POSITION_WIDTH / 2,
-    headerCenterY,
-    22,
-    "#aaaaaa",
-    "bold",
-    "center",
-  );
-
-  drawText(
-    ctx,
-    "TEAM",
-    teamX + 20,
-    headerCenterY,
-    22,
-    "#aaaaaa",
-    "bold",
-    "left",
-  );
-
-  const headerColumns = [
+  const columns = [
     {
-      text: "P",
+      name: "#",
       x:
-        playedX +
-        STAT_WIDTH / 2,
+        LEFT +
+        POSITION_WIDTH / 2,
+      width: POSITION_WIDTH,
     },
     {
-      text: "W",
+      name: "TEAM",
       x:
-        winsX +
-        STAT_WIDTH / 2,
+        LEFT +
+        POSITION_WIDTH +
+        20,
+      width: TEAM_WIDTH,
     },
     {
-      text: "D",
+      name: "P",
       x:
-        drawsX +
+        LEFT +
+        POSITION_WIDTH +
+        TEAM_WIDTH +
         STAT_WIDTH / 2,
+      width: STAT_WIDTH,
     },
     {
-      text: "L",
+      name: "W",
       x:
-        lossesX +
-        STAT_WIDTH / 2,
+        LEFT +
+        POSITION_WIDTH +
+        TEAM_WIDTH +
+        STAT_WIDTH * 1.5,
+      width: STAT_WIDTH,
     },
     {
-      text: "GF",
+      name: "D",
       x:
-        goalsForX +
-        STAT_WIDTH / 2,
+        LEFT +
+        POSITION_WIDTH +
+        TEAM_WIDTH +
+        STAT_WIDTH * 2.5,
+      width: STAT_WIDTH,
     },
     {
-      text: "GA",
+      name: "L",
       x:
-        goalsAgainstX +
-        STAT_WIDTH / 2,
+        LEFT +
+        POSITION_WIDTH +
+        TEAM_WIDTH +
+        STAT_WIDTH * 3.5,
+      width: STAT_WIDTH,
     },
     {
-      text: "GD",
+      name: "GF",
       x:
-        goalDifferenceX +
+        LEFT +
+        POSITION_WIDTH +
+        TEAM_WIDTH +
+        STAT_WIDTH * 4.5,
+      width: STAT_WIDTH,
+    },
+    {
+      name: "GA",
+      x:
+        LEFT +
+        POSITION_WIDTH +
+        TEAM_WIDTH +
+        STAT_WIDTH * 5.5,
+      width: STAT_WIDTH,
+    },
+    {
+      name: "GD",
+      x:
+        LEFT +
+        POSITION_WIDTH +
+        TEAM_WIDTH +
+        STAT_WIDTH * 6 +
         GOAL_DIFF_WIDTH / 2,
+      width: GOAL_DIFF_WIDTH,
     },
     {
-      text: "PTS",
+      name: "PTS",
       x:
-        pointsX +
+        WIDTH -
+        RIGHT -
         POINTS_WIDTH / 2,
+      width: POINTS_WIDTH,
     },
   ];
 
-  for (const column of headerColumns) {
-    drawText(
+  ctx.fillStyle = "#aaaaaa";
+
+  ctx.font =
+    `700 18px "${FONT_FAMILY}"`;
+
+  for (const column of columns) {
+    drawTextCenter(
       ctx,
-      column.text,
+      column.name,
       column.x,
-      headerCenterY,
-      22,
-      "#aaaaaa",
-      "bold",
-      "center",
+      TOP_HEIGHT + 50,
     );
   }
 
-  const logoMap = new Map<
-    string,
-    Image | null
-  >();
+  /* =========================
+     ROWS
+  ========================= */
 
-  await Promise.all(
-    rows.map(async (row) => {
-      const image =
-        await downloadLogo(
-          row.team.logo_url,
-        );
+  for (
+    let index = 0;
+    index < standings.length;
+    index++
+  ) {
+    const standing =
+      standings[index];
 
-      logoMap.set(
-        row.team.id,
-        image,
-      );
-    }),
-  );
-
-  rows.forEach((row, index) => {
-    const y =
+    const rowY =
       BODY_START_Y +
       index * ROW_HEIGHT;
 
@@ -839,193 +771,269 @@ async function generateTablePng(
 
     ctx.fillRect(
       LEFT,
-      y,
+      rowY,
       TABLE_WIDTH,
       ROW_HEIGHT,
     );
 
-    ctx.strokeStyle = "#222222";
+    ctx.strokeStyle =
+      "#222222";
+
     ctx.lineWidth = 1;
 
     ctx.beginPath();
 
     ctx.moveTo(
       LEFT,
-      y + ROW_HEIGHT - 1,
+      rowY +
+        ROW_HEIGHT,
     );
 
     ctx.lineTo(
-      LEFT + TABLE_WIDTH,
-      y + ROW_HEIGHT - 1,
+      LEFT +
+        TABLE_WIDTH,
+      rowY +
+        ROW_HEIGHT,
     );
 
     ctx.stroke();
 
-    const centerY =
-      y + ROW_HEIGHT / 2;
+    /* Position */
 
-    drawText(
+    ctx.fillStyle = "#dddddd";
+
+    ctx.font =
+      `24px "${FONT_FAMILY}"`;
+
+    drawTextCenter(
       ctx,
-      String(row.position),
-      positionX +
+      String(index + 1),
+      LEFT +
         POSITION_WIDTH / 2,
-      centerY,
-      24,
-      "#dddddd",
-      "normal",
-      "center",
+      rowY +
+        ROW_HEIGHT / 2 +
+        8,
     );
+
+    /* Team */
+
+    const team =
+      standing.teams;
+
+    const teamName =
+      team?.name ??
+      "Unknown Team";
 
     const logoSize = 58;
 
     const logoX =
-      teamX + 18;
+      LEFT +
+      POSITION_WIDTH +
+      18;
 
     const logoY =
-      centerY -
-      logoSize / 2;
+      rowY +
+      (ROW_HEIGHT -
+        logoSize) /
+        2;
 
-    drawLogo(
-      ctx,
-      logoMap.get(
-        row.team.id,
-      ) ?? null,
-      row.team.name,
-      logoX,
-      logoY,
-      logoSize,
-    );
+    const logo =
+      await loadTeamLogo(
+        team?.logo_url,
+      );
 
-    drawText(
-      ctx,
-      truncateText(
-        row.team.name,
-        30,
-      ),
-      logoX +
-        logoSize +
-        20,
-      centerY,
-      25,
-      "#ffffff",
-      "bold",
-      "left",
-    );
+    if (logo) {
+      try {
+        const ratio =
+          Math.min(
+            logoSize /
+              logo.width,
+            logoSize /
+              logo.height,
+          );
 
-    const stats = [
-      {
-        value: row.played,
-        x:
-          playedX +
-          STAT_WIDTH / 2,
-      },
-      {
-        value: row.wins,
-        x:
-          winsX +
-          STAT_WIDTH / 2,
-      },
-      {
-        value: row.draws,
-        x:
-          drawsX +
-          STAT_WIDTH / 2,
-      },
-      {
-        value: row.losses,
-        x:
-          lossesX +
-          STAT_WIDTH / 2,
-      },
-      {
-        value: row.goalsFor,
-        x:
-          goalsForX +
-          STAT_WIDTH / 2,
-      },
-      {
-        value: row.goalsAgainst,
-        x:
-          goalsAgainstX +
-          STAT_WIDTH / 2,
-      },
-    ];
+        const drawWidth =
+          logo.width *
+          ratio;
 
-    for (const stat of stats) {
-      drawText(
+        const drawHeight =
+          logo.height *
+          ratio;
+
+        const drawX =
+          logoX +
+          (logoSize -
+            drawWidth) /
+            2;
+
+        const drawY =
+          logoY +
+          (logoSize -
+            drawHeight) /
+            2;
+
+        ctx.drawImage(
+          logo,
+          drawX,
+          drawY,
+          drawWidth,
+          drawHeight,
+        );
+      } catch {
+        drawFallbackBadge(
+          ctx,
+          getInitials(
+            teamName,
+          ),
+          logoX,
+          logoY,
+          logoSize,
+        );
+      }
+    } else {
+      drawFallbackBadge(
         ctx,
-        String(stat.value),
-        stat.x,
-        centerY,
-        24,
-        "#dddddd",
-        "normal",
-        "center",
+        getInitials(
+          teamName,
+        ),
+        logoX,
+        logoY,
+        logoSize,
       );
     }
 
-    const gd =
-      row.goalDifference > 0
-        ? `+${row.goalDifference}`
-        : String(
-            row.goalDifference,
-          );
+    ctx.fillStyle = "#ffffff";
 
-    drawText(
+    ctx.font =
+      `700 25px "${FONT_FAMILY}"`;
+
+    ctx.textAlign = "left";
+
+    ctx.fillText(
+      teamName,
+      logoX +
+        logoSize +
+        20,
+      rowY +
+        ROW_HEIGHT / 2 +
+        8,
+    );
+
+    /* Stats */
+
+    ctx.fillStyle = "#dddddd";
+
+    ctx.font =
+      `24px "${FONT_FAMILY}"`;
+
+    const statY =
+      rowY +
+      ROW_HEIGHT / 2 +
+      8;
+
+    const statValues = [
+      standing.played,
+      standing.wins,
+      standing.draws,
+      standing.losses,
+      standing.goals_for,
+      standing.goals_against,
+    ];
+
+    for (
+      let statIndex = 0;
+      statIndex <
+        statValues.length;
+      statIndex++
+    ) {
+      const x =
+        LEFT +
+        POSITION_WIDTH +
+        TEAM_WIDTH +
+        STAT_WIDTH *
+          statIndex +
+        STAT_WIDTH / 2;
+
+      drawTextCenter(
+        ctx,
+        String(
+          statValues[
+            statIndex
+          ] ?? 0,
+        ),
+        x,
+        statY,
+      );
+    }
+
+    let gd =
+      standing.goal_difference ??
+      0;
+
+    const gdText =
+      gd > 0
+        ? `+${gd}`
+        : String(gd);
+
+    drawTextCenter(
       ctx,
-      gd,
-      goalDifferenceX +
+      gdText,
+      LEFT +
+        POSITION_WIDTH +
+        TEAM_WIDTH +
+        STAT_WIDTH * 6 +
         GOAL_DIFF_WIDTH / 2,
-      centerY,
-      24,
-      "#dddddd",
-      "normal",
-      "center",
+      statY,
     );
 
-    drawText(
+    ctx.fillStyle = "#ffffff";
+
+    ctx.font =
+      `700 27px "${FONT_FAMILY}"`;
+
+    drawTextCenter(
       ctx,
-      String(row.points),
-      pointsX +
+      String(
+        standing.points ?? 0,
+      ),
+      WIDTH -
+        RIGHT -
         POINTS_WIDTH / 2,
-      centerY,
-      27,
-      "#ffffff",
-      "bold",
-      "center",
+      statY,
     );
-  });
+  }
+
+  /* =========================
+     FOOTER
+  ========================= */
 
   const footerY =
     BODY_START_Y +
-    rows.length * ROW_HEIGHT;
+    standings.length *
+      ROW_HEIGHT;
 
-  drawText(
-    ctx,
+  ctx.fillStyle = "#666666";
+
+  ctx.font =
+    `17px "${FONT_FAMILY}"`;
+
+  ctx.textAlign = "left";
+
+  ctx.fillText(
     "Generated automatically by NOVA",
     LEFT,
-    footerY +
-      FOOTER_HEIGHT / 2,
-    17,
-    "#666666",
-    "normal",
-    "left",
+    footerY + 44,
   );
 
-  drawText(
+  drawTextRight(
     ctx,
-    `${rows.length} TEAM${
-      rows.length === 1
-        ? ""
-        : "S"
-    }`,
+    `${standings.length} TEAM(S)`,
     WIDTH - RIGHT,
-    footerY +
-      FOOTER_HEIGHT / 2,
-    17,
-    "#666666",
-    "normal",
-    "right",
+    footerY + 44,
+  );
+
+  console.log(
+    `[TABLES] Image generated successfully for ${division.name}, GW${gameweek}`,
   );
 
   return canvas.toBuffer(
@@ -1033,132 +1041,29 @@ async function generateTablePng(
   );
 }
 
-async function getTablePost(
-  divisionId: string,
-  gameweek: number,
-): Promise<TrackedPost | null> {
-  const { data, error } =
-    await supabase
-      .from("gameweek_table_posts")
-      .select("*")
-      .eq(
-        "division_id",
-        divisionId,
-      )
-      .eq(
-        "gameweek_number",
-        gameweek,
-      )
-      .order("created_at", {
-        ascending: false,
-      })
-      .limit(1)
-      .maybeSingle();
-
-  if (error) {
-    console.error(
-      "[TABLES] Failed to load tracked table post:",
-      error,
-    );
-
-    return null;
-  }
-
-  if (!data) {
-    return null;
-  }
-
-  return {
-    id: data.id,
-    division_id: data.division_id,
-    gameweek: Number(
-      data.gameweek_number,
-    ),
-    channel_id: data.channel_id,
-    message_id: data.message_id,
-  };
-}
-
-async function deleteTrackedPost(
-  client: Client,
-  tracked: TrackedPost,
-) {
-  try {
-    const channel =
-      await client.channels.fetch(
-        tracked.channel_id,
-      );
-
-    if (
-      channel &&
-      "messages" in channel &&
-      channel.type ===
-        ChannelType.GuildText
-    ) {
-      const message =
-        await channel.messages.fetch(
-          tracked.message_id,
-        );
-
-      await message
-        .delete()
-        .catch(
-          () => undefined,
-        );
-    }
-  } catch {
-    // Message may already be gone.
-  }
-
-  await supabase
-    .from("gameweek_table_posts")
-    .delete()
-    .eq("id", tracked.id);
-}
-
-async function isTrackedPostHealthy(
-  client: Client,
-  tracked: TrackedPost,
-): Promise<boolean> {
-  try {
-    const channel =
-      await client.channels.fetch(
-        tracked.channel_id,
-      );
-
-    if (
-      !channel ||
-      !("messages" in channel)
-    ) {
-      return false;
-    }
-
-    const message =
-      await channel.messages.fetch(
-        tracked.message_id,
-      );
-
-    return Boolean(message);
-  } catch {
-    return false;
-  }
-}
+/* =========================
+   POST TABLE
+========================= */
 
 async function postTable(
   client: Client,
   division: Division,
+  standings: Standing[],
   gameweekNumber: number,
 ) {
+  console.log(
+    `[TABLES] ===== POST TABLE START: ${division.name} GW${gameweekNumber} =====`,
+  );
+
   const leagueSettings =
     await getGuildSettings(
       division.league_id,
     );
 
-  const channelId =
-    leagueSettings?.table_channel_id;
-
-  if (!channelId) {
-    console.warn(
+  if (
+    !leagueSettings?.table_channel_id
+  ) {
+    console.error(
       `[TABLES] No table channel configured for league ${division.league_id}`,
     );
 
@@ -1167,235 +1072,157 @@ async function postTable(
 
   const channel =
     await client.channels.fetch(
-      channelId,
+      leagueSettings.table_channel_id,
     );
 
   if (
     !channel ||
-    channel.type !==
-      ChannelType.GuildText
+    !channel.isTextBased()
   ) {
-    console.warn(
-      `[TABLES] Table channel ${channelId} is not a text channel.`,
+    console.error(
+      `[TABLES] Table channel ${leagueSettings.table_channel_id} is unavailable or not text based.`,
     );
 
     return;
   }
 
-  const teams = await getTeams(
-    division.id,
+  const image =
+    await generateTableImage(
+      division,
+      standings,
+      gameweekNumber,
+    );
+
+  const attachment =
+    new AttachmentBuilder(
+      image,
+      {
+        name: `nova-table-${division.id}-gw${gameweekNumber}.png`,
+      },
+    );
+
+  const message =
+    await (
+      channel as TextChannel
+    ).send({
+      files: [attachment],
+    });
+
+  console.log(
+    `[TABLES] Discord table posted successfully. Message ${message.id}`,
   );
 
-  if (!teams.length) {
-    console.warn(
-      `[TABLES] No teams found for division ${division.id}`,
-    );
+  await saveTablePost(
+    division.id,
+    gameweekNumber,
+    leagueSettings.table_channel_id,
+    message.id,
+  );
 
-    return;
-  }
+  console.log(
+    `[TABLES] ===== POST TABLE END: ${division.name} GW${gameweekNumber} =====`,
+  );
+}
+
+/* =========================
+   GAMEWEEK CHECKING
+========================= */
+
+async function checkDivision(
+  client: Client,
+  division: Division,
+) {
+  console.log(
+    `[TABLES] >>> Checking division ${division.name} (${division.id}) status=${division.status}`,
+  );
 
   const standings =
     await getStandings(
       division.id,
     );
 
-  const rows = buildTable(
-    teams,
-    standings,
-  );
-
-  if (!rows.length) {
-    console.warn(
-      `[TABLES] No table rows generated for division ${division.id}`,
-    );
-
-    return;
-  }
-
-  const png =
-    await generateTablePng(
-      division,
-      rows,
-    );
-
-  const safeName =
-    division.name
-      .toLowerCase()
-      .replace(
-        /[^a-z0-9]+/g,
-        "-",
-      )
-      .replace(
-        /^-+|-+$/g,
-        "",
-      ) || "division";
-
-  const attachment =
-    new AttachmentBuilder(
-      png,
-      {
-        name: `nova-${safeName}-gw${gameweekNumber}.png`,
-      },
-    );
-
-  const message =
-    await channel.send({
-      content:
-        `📊 **${division.name} • Gameweek ${gameweekNumber} Table**`,
-      files: [attachment],
-    });
-
-  const { data, error } =
-    await supabase
-      .from("gameweek_table_posts")
-      .insert({
-        division_id: division.id,
-        gameweek_number:
-          gameweekNumber,
-        channel_id: channelId,
-        message_id: message.id,
-      })
-      .select()
-      .single();
-
-  if (error) {
-    console.error(
-      "[TABLES] Failed to track table post:",
-      error,
-    );
-
-    await message
-      .delete()
-      .catch(
-        () => undefined,
-      );
-
-    return;
-  }
-
   console.log(
-    `[TABLES] Posted ${division.name} GW${gameweekNumber} table (${message.id})`,
+    `[TABLES] ${division.name}: ${standings.length} standings rows loaded.`,
   );
 
-  return data;
-}
+  /*
+   * GW0 is the initial league table.
+   */
 
-async function gameweekIsComplete(
-  divisionId: string,
-  gameweekNumber: number,
-): Promise<boolean> {
-  const { data, error } =
-    await supabase
-      .from("fixtures")
-      .select("id,status")
-      .eq(
-        "division_id",
-        divisionId,
-      )
-      .eq(
-        "gameweek",
-        gameweekNumber,
-      );
-
-  if (error) {
-    console.error(
-      `[TABLES] Failed to check GW${gameweekNumber}:`,
-      error,
-    );
-
-    return false;
-  }
-
-  if (!data?.length) {
-    return false;
-  }
-
-  return data.every(
-    (
-      fixture: {
-        status: string | null;
-      },
-    ) =>
-      String(
-        fixture.status,
-      ).toLowerCase() ===
-      "completed",
-  );
-}
-
-async function checkDivision(
-  client: Client,
-  division: Division,
-) {
-  const initialPost =
+  const existingGW0 =
     await getTablePost(
       division.id,
       0,
     );
 
-  if (initialPost) {
-    const healthy =
-      await isTrackedPostHealthy(
-        client,
-        initialPost,
-      );
-
-    if (!healthy) {
-      await deleteTrackedPost(
-        client,
-        initialPost,
-      );
-    }
-  }
-
-  const refreshedInitialPost =
-    await getTablePost(
-      division.id,
-      0,
+  if (!existingGW0) {
+    console.log(
+      `[TABLES] ${division.name}: GW0 does not exist. Posting initial table...`,
     );
 
-  if (!refreshedInitialPost) {
     await postTable(
       client,
       division,
+      standings,
       0,
+    );
+  } else {
+    console.log(
+      `[TABLES] ${division.name}: GW0 already exists as ${existingGW0.messageId}`,
     );
   }
 
+  /* =========================
+     LOAD GAMEWEEKS
+  ========================= */
+
+  console.log(
+    `[TABLES] ${division.name}: Loading gameweeks...`,
+  );
+
   const {
     data: gameweeks,
-    error,
+    error: gameweeksError,
   } = await supabase
     .from("gameweeks")
     .select(
-      "id,division_id,number,starts_at,created_at",
+      "id, division_id, number, starts_at, created_at",
     )
     .eq(
       "division_id",
       division.id,
     )
-    .order("number", {
-      ascending: true,
-    });
+    .order(
+      "number",
+      {
+        ascending: true,
+      },
+    );
 
-  if (error) {
+  if (gameweeksError) {
     console.error(
       `[TABLES] Failed to load gameweeks for ${division.name}:`,
-      error,
+      gameweeksError,
     );
 
     return;
   }
 
-  if (!gameweeks?.length) {
-    return;
-  }
+  console.log(
+    `[TABLES] ${division.name}: Found ${gameweeks?.length ?? 0} gameweeks.`,
+  );
 
-  for (const gameweek of gameweeks) {
+  for (
+    const gameweek of
+      gameweeks ?? []
+  ) {
     const number =
-      Number(gameweek.number);
+      gameweek.number;
 
-    if (!Number.isFinite(number)) {
+    if (
+      number === null ||
+      number === undefined
+    ) {
       continue;
     }
 
@@ -1406,77 +1233,186 @@ async function checkDivision(
       );
 
     if (tracked) {
-      const healthy =
-        await isTrackedPostHealthy(
-          client,
-          tracked,
-        );
-
-      if (healthy) {
-        continue;
-      }
-
-      await deleteTrackedPost(
-        client,
-        tracked,
+      console.log(
+        `[TABLES] ${division.name}: GW${number} already posted, skipping.`,
       );
+
+      continue;
     }
 
-    const complete =
-      await gameweekIsComplete(
+    console.log(
+      `[TABLES] ${division.name}: Checking fixtures for GW${number}...`,
+    );
+
+    const {
+      data: fixtures,
+      error: fixturesError,
+    } = await supabase
+      .from("fixtures")
+      .select(
+        "id, division_id, gameweek, status",
+      )
+      .eq(
+        "division_id",
         division.id,
+      )
+      .eq(
+        "gameweek",
         number,
       );
 
-    if (!complete) {
+    if (fixturesError) {
+      console.error(
+        `[TABLES] Failed to load fixtures for ${division.name} GW${number}:`,
+        fixturesError,
+      );
+
       break;
     }
+
+    console.log(
+      `[TABLES] ${division.name}: GW${number} has ${fixtures?.length ?? 0} fixtures.`,
+    );
+
+    if (
+      !fixtures ||
+      fixtures.length === 0
+    ) {
+      console.log(
+        `[TABLES] ${division.name}: GW${number} has no fixtures yet. Stopping here.`,
+      );
+
+      break;
+    }
+
+    const incomplete =
+      fixtures.some(
+        (fixture: {
+          status: string | null;
+        }) =>
+          fixture.status !==
+          "completed",
+      );
+
+    if (incomplete) {
+      console.log(
+        `[TABLES] ${division.name}: GW${number} is not complete yet. Stopping here.`,
+      );
+
+      break;
+    }
+
+    console.log(
+      `[TABLES] ${division.name}: GW${number} is COMPLETE. Posting table...`,
+    );
+
+    const updatedStandings =
+      await getStandings(
+        division.id,
+      );
 
     await postTable(
       client,
       division,
+      updatedStandings,
       number,
     );
   }
 }
 
-export async function checkGameweekTables(
+/* =========================
+   MAIN CHECK
+========================= */
+
+async function checkGameweekTables(
   client: Client,
 ) {
+  console.log(
+    "[TABLES] ========================================",
+  );
+
+  console.log(
+    "[TABLES] checkGameweekTables() STARTED",
+  );
+
+  console.log(
+    "[TABLES] Loading active/running divisions...",
+  );
+
   const {
     data: divisions,
     error,
   } = await supabase
     .from("divisions")
     .select(
-      [
-        "id",
-        "league_id",
-        "name",
-        "tier",
-        "season",
-        "status",
-        "gameweek_interval_days",
-      ].join(","),
+      "id, league_id, name, tier, season, status",
     )
-    .in("status", [
-      "active",
-      "running",
-    ]);
+    .in(
+      "status",
+      [
+        "active",
+        "running",
+      ],
+    );
 
   if (error) {
     console.error(
-      "[TABLES] Failed to load active divisions:",
+      "[TABLES] Failed to load divisions:",
       error,
     );
 
     return;
   }
 
-  for (
-    const division of
-      (divisions ?? []) as unknown as Division[]
+  console.log(
+    `[TABLES] Active/running divisions found: ${divisions?.length ?? 0}`,
+  );
+
+  if (
+    !divisions ||
+    divisions.length === 0
   ) {
+    console.log(
+      "[TABLES] NO ACTIVE/RUNNING DIVISIONS FOUND. Nothing to generate.",
+    );
+
+    /*
+     * Diagnostic only:
+     * Load all statuses so we can see what the database
+     * actually contains.
+     */
+
+    const {
+      data: allDivisions,
+      error: allDivisionsError,
+    } = await supabase
+      .from("divisions")
+      .select(
+        "id, name, status",
+      );
+
+    if (allDivisionsError) {
+      console.error(
+        "[TABLES] Failed to load all division statuses:",
+        allDivisionsError,
+      );
+    } else {
+      console.log(
+        "[TABLES] ALL DIVISION STATUSES:",
+        allDivisions,
+      );
+    }
+
+    return;
+  }
+
+  for (const division of
+    (divisions ??
+      []) as unknown as Division[]) {
+    console.log(
+      `[TABLES] Starting division: ${division.name} | status=${division.status} | id=${division.id}`,
+    );
+
     try {
       await checkDivision(
         client,
@@ -1489,40 +1425,56 @@ export async function checkGameweekTables(
       );
     }
   }
+
+  console.log(
+    "[TABLES] checkGameweekTables() FINISHED",
+  );
+
+  console.log(
+    "[TABLES] ========================================",
+  );
 }
+
+/* =========================
+   WATCHER
+========================= */
 
 export function startGameweekTableWatcher(
   client: Client,
 ) {
-  let running = false;
+  console.log(
+    "[TABLES] ========================================",
+  );
 
-  const run = async () => {
-    if (running) {
-      return;
-    }
+  console.log(
+    "[TABLES] GAMEWEEK TABLE WATCHER STARTING",
+  );
 
-    running = true;
+  console.log(
+    "[TABLES] Running initial table check NOW...",
+  );
 
-    try {
-      await checkGameweekTables(
-        client,
-      );
-    } catch (error) {
+  void checkGameweekTables(
+    client,
+  ).catch((error) => {
+    console.error(
+      "[TABLES] Initial table check crashed:",
+      error,
+    );
+  });
+
+  setInterval(() => {
+    console.log(
+      "[TABLES] 30-second table watcher tick...",
+    );
+
+    void checkGameweekTables(
+      client,
+    ).catch((error) => {
       console.error(
-        "[TABLES] Watcher error:",
+        "[TABLES] Scheduled table check crashed:",
         error,
       );
-    } finally {
-      running = false;
-    }
-  };
-
-  void run();
-
-  setInterval(
-    () => {
-      void run();
-    },
-    30_000,
-  );
+    });
+  }, 30_000);
 }
