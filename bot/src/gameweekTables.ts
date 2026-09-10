@@ -11,7 +11,7 @@ import {
 } from "canvas";
 import { existsSync } from "fs";
 import { dirname, join } from "path";
-import { supabase } from "./supabase";
+import { supabase } from "./supabase.js";
 
 type Division = {
   id: string;
@@ -82,30 +82,41 @@ const STAT_WIDTH = 90;
 const GOAL_DIFF_WIDTH = 105;
 const POINTS_WIDTH = 120;
 
-const STAT_COLUMNS_WIDTH =
-  STAT_WIDTH * 6;
-
-const BODY_START_Y =
-  TOP_HEIGHT + HEADER_HEIGHT;
+const BODY_START_Y = TOP_HEIGHT + HEADER_HEIGHT;
 
 const FONT_FAMILY = "DejaVu Sans";
 
-/*
- * Keep a bundled DejaVu Sans font if the project has one.
- * This gives Railway the same font every time instead of
- * depending on whatever fonts happen to exist on the host.
- */
 const FONT_CANDIDATES = [
-  join(dirname(__dirname), "assets", "fonts", "DejaVuSans.ttf"),
-  join(dirname(__dirname), "fonts", "DejaVuSans.ttf"),
-  join(process.cwd(), "assets", "fonts", "DejaVuSans.ttf"),
-  join(process.cwd(), "fonts", "DejaVuSans.ttf"),
+  join(
+    dirname(__dirname),
+    "assets",
+    "fonts",
+    "DejaVuSans.ttf",
+  ),
+  join(
+    dirname(__dirname),
+    "fonts",
+    "DejaVuSans.ttf",
+  ),
+  join(
+    process.cwd(),
+    "assets",
+    "fonts",
+    "DejaVuSans.ttf",
+  ),
+  join(
+    process.cwd(),
+    "fonts",
+    "DejaVuSans.ttf",
+  ),
 ];
 
 let registeredFont = false;
 
 for (const fontPath of FONT_CANDIDATES) {
-  if (!existsSync(fontPath)) continue;
+  if (!existsSync(fontPath)) {
+    continue;
+  }
 
   try {
     registerFont(fontPath, {
@@ -131,19 +142,15 @@ for (const fontPath of FONT_CANDIDATES) {
 
 if (!registeredFont) {
   console.warn(
-    "[TABLES] DejaVuSans.ttf not found. Using system DejaVu Sans fallback.",
+    "[TABLES] DejaVuSans.ttf not found. Using system font fallback.",
   );
-}
-
-function escapeText(value: string): string {
-  return String(value ?? "");
 }
 
 function truncateText(
   text: string,
   maxLength: number,
 ): string {
-  const value = escapeText(text);
+  const value = String(text ?? "");
 
   if (value.length <= maxLength) {
     return value;
@@ -174,8 +181,14 @@ function roundedRect(
   );
 
   ctx.beginPath();
+
   ctx.moveTo(x + r, y);
-  ctx.lineTo(x + width - r, y);
+
+  ctx.lineTo(
+    x + width - r,
+    y,
+  );
+
   ctx.quadraticCurveTo(
     x + width,
     y,
@@ -195,7 +208,10 @@ function roundedRect(
     y + height,
   );
 
-  ctx.lineTo(x + r, y + height);
+  ctx.lineTo(
+    x + r,
+    y + height,
+  );
 
   ctx.quadraticCurveTo(
     x,
@@ -204,7 +220,10 @@ function roundedRect(
     y + height - r,
   );
 
-  ctx.lineTo(x, y + r);
+  ctx.lineTo(
+    x,
+    y + r,
+  );
 
   ctx.quadraticCurveTo(
     x,
@@ -355,9 +374,8 @@ function buildTable(
   }
 
   const rows = teams.map((team) => {
-    const standing = standingsByTeam.get(
-      team.id,
-    );
+    const standing =
+      standingsByTeam.get(team.id);
 
     return {
       position: 0,
@@ -366,7 +384,8 @@ function buildTable(
       wins: standing?.wins ?? 0,
       draws: standing?.draws ?? 0,
       losses: standing?.losses ?? 0,
-      goalsFor: standing?.goals_for ?? 0,
+      goalsFor:
+        standing?.goals_for ?? 0,
       goalsAgainst:
         standing?.goals_against ?? 0,
       goalDifference:
@@ -448,10 +467,6 @@ async function downloadLogo(
       return null;
     }
 
-    /*
-     * node-canvas detects the image format
-     * directly from the bytes.
-     */
     return await loadImage(buffer);
   } catch (error) {
     console.warn(
@@ -470,11 +485,16 @@ function drawFallbackBadge(
   y: number,
   size: number,
 ) {
-  const centerX = x + size / 2;
-  const centerY = y + size / 2;
+  const centerX =
+    x + size / 2;
+
+  const centerY =
+    y + size / 2;
+
   const radius = size / 2;
 
   ctx.beginPath();
+
   ctx.arc(
     centerX,
     centerY,
@@ -507,7 +527,10 @@ function drawFallbackBadge(
     initials,
     centerX,
     centerY,
-    Math.max(18, Math.floor(size * 0.28)),
+    Math.max(
+      18,
+      Math.floor(size * 0.28),
+    ),
     "#ffffff",
     "bold",
     "center",
@@ -536,7 +559,9 @@ function drawLogo(
 
   try {
     const naturalWidth =
-      image.width || image.naturalWidth || 1;
+      image.width ||
+      image.naturalWidth ||
+      1;
 
     const naturalHeight =
       image.height ||
@@ -600,11 +625,9 @@ async function generateTablePng(
     height,
   );
 
-  const ctx = canvas.getContext("2d");
+  const ctx =
+    canvas.getContext("2d");
 
-  /*
-   * Black NOVA background.
-   */
   ctx.fillStyle = "#080808";
 
   ctx.fillRect(
@@ -614,9 +637,6 @@ async function generateTablePng(
     height,
   );
 
-  /*
-   * Header.
-   */
   drawText(
     ctx,
     "NOVA",
@@ -661,9 +681,6 @@ async function generateTablePng(
     "right",
   );
 
-  /*
-   * Column positions.
-   */
   const positionX = LEFT;
 
   const teamX =
@@ -694,9 +711,6 @@ async function generateTablePng(
     goalDifferenceX +
     GOAL_DIFF_WIDTH;
 
-  /*
-   * Table header background.
-   */
   roundedRect(
     ctx,
     LEFT,
@@ -800,9 +814,6 @@ async function generateTablePng(
     );
   }
 
-  /*
-   * Load every logo before drawing the rows.
-   */
   const logoMap = new Map<
     string,
     Image | null
@@ -810,9 +821,10 @@ async function generateTablePng(
 
   await Promise.all(
     rows.map(async (row) => {
-      const image = await downloadLogo(
-        row.team.logo_url,
-      );
+      const image =
+        await downloadLogo(
+          row.team.logo_url,
+        );
 
       logoMap.set(
         row.team.id,
@@ -821,9 +833,6 @@ async function generateTablePng(
     }),
   );
 
-  /*
-   * Rows.
-   */
   rows.forEach((row, index) => {
     const y =
       BODY_START_Y +
@@ -841,29 +850,26 @@ async function generateTablePng(
       ROW_HEIGHT,
     );
 
-    /*
-     * Horizontal divider.
-     */
     ctx.strokeStyle = "#222222";
     ctx.lineWidth = 1;
 
     ctx.beginPath();
+
     ctx.moveTo(
       LEFT,
       y + ROW_HEIGHT - 1,
     );
+
     ctx.lineTo(
       LEFT + TABLE_WIDTH,
       y + ROW_HEIGHT - 1,
     );
+
     ctx.stroke();
 
     const centerY =
       y + ROW_HEIGHT / 2;
 
-    /*
-     * Position.
-     */
     drawText(
       ctx,
       String(row.position),
@@ -876,29 +882,26 @@ async function generateTablePng(
       "center",
     );
 
-    /*
-     * Logo.
-     */
     const logoSize = 58;
 
     const logoX =
       teamX + 18;
 
     const logoY =
-      centerY - logoSize / 2;
+      centerY -
+      logoSize / 2;
 
     drawLogo(
       ctx,
-      logoMap.get(row.team.id) ?? null,
+      logoMap.get(
+        row.team.id,
+      ) ?? null,
       row.team.name,
       logoX,
       logoY,
       logoSize,
     );
 
-    /*
-     * Team name.
-     */
     drawText(
       ctx,
       truncateText(
@@ -915,9 +918,6 @@ async function generateTablePng(
       "left",
     );
 
-    /*
-     * Stats.
-     */
     const stats = [
       {
         value: row.played,
@@ -970,13 +970,12 @@ async function generateTablePng(
       );
     }
 
-    /*
-     * Goal difference.
-     */
     const gd =
       row.goalDifference > 0
         ? `+${row.goalDifference}`
-        : String(row.goalDifference);
+        : String(
+            row.goalDifference,
+          );
 
     drawText(
       ctx,
@@ -990,9 +989,6 @@ async function generateTablePng(
       "center",
     );
 
-    /*
-     * Points.
-     */
     drawText(
       ctx,
       String(row.points),
@@ -1006,9 +1002,6 @@ async function generateTablePng(
     );
   });
 
-  /*
-   * Footer.
-   */
   const footerY =
     BODY_START_Y +
     rows.length * ROW_HEIGHT;
@@ -1028,7 +1021,9 @@ async function generateTablePng(
   drawText(
     ctx,
     `${rows.length} TEAM${
-      rows.length === 1 ? "" : "S"
+      rows.length === 1
+        ? ""
+        : "S"
     }`,
     WIDTH - RIGHT,
     footerY +
@@ -1048,16 +1043,23 @@ async function getTablePost(
   divisionId: string,
   gameweek: number,
 ): Promise<TrackedPost | null> {
-  const { data, error } = await supabase
-    .from("gameweek_table_posts")
-    .select("*")
-    .eq("division_id", divisionId)
-    .eq("gameweek", gameweek)
-    .order("created_at", {
-      ascending: false,
-    })
-    .limit(1)
-    .maybeSingle();
+  const { data, error } =
+    await supabase
+      .from("gameweek_table_posts")
+      .select("*")
+      .eq(
+        "division_id",
+        divisionId,
+      )
+      .eq(
+        "gameweek",
+        gameweek,
+      )
+      .order("created_at", {
+        ascending: false,
+      })
+      .limit(1)
+      .maybeSingle();
 
   if (error) {
     console.error(
@@ -1092,9 +1094,11 @@ async function deleteTrackedPost(
           tracked.message_id,
         );
 
-      await message.delete().catch(
-        () => undefined,
-      );
+      await message
+        .delete()
+        .catch(
+          () => undefined,
+        );
     }
   } catch {
     // Message may already be gone.
@@ -1179,7 +1183,8 @@ async function postTable(
 
   if (
     !channel ||
-    channel.type !== ChannelType.GuildText
+    channel.type !==
+      ChannelType.GuildText
   ) {
     console.warn(
       `[TABLES] Table channel ${channelId} is not a text channel.`,
@@ -1271,7 +1276,9 @@ async function postTable(
 
     await message
       .delete()
-      .catch(() => undefined);
+      .catch(
+        () => undefined,
+      );
 
     return;
   }
@@ -1290,11 +1297,15 @@ async function gameweekIsComplete(
   const { data, error } =
     await supabase
       .from("fixtures")
-      .select(
-        "id,status",
+      .select("id,status")
+      .eq(
+        "division_id",
+        divisionId,
       )
-      .eq("division_id", divisionId)
-      .eq("gameweek", gameweekNumber);
+      .eq(
+        "gameweek",
+        gameweekNumber,
+      );
 
   if (error) {
     console.error(
@@ -1310,7 +1321,11 @@ async function gameweekIsComplete(
   }
 
   return data.every(
-    (fixture) =>
+    (
+      fixture: {
+        status: string | null;
+      },
+    ) =>
       String(
         fixture.status,
       ).toLowerCase() ===
@@ -1322,11 +1337,6 @@ async function checkDivision(
   client: Client,
   division: Division,
 ) {
-  /*
-   * GW0 is the initial table.
-   * Only create it if there isn't already
-   * a healthy tracked post.
-   */
   const initialPost =
     await getTablePost(
       division.id,
@@ -1362,19 +1372,21 @@ async function checkDivision(
     );
   }
 
-  /*
-   * Check completed gameweeks.
-   */
-  const { data: gameweeks, error } =
-    await supabase
-      .from("gameweeks")
-      .select(
-        "id,division_id,number,starts_at,created_at",
-      )
-      .eq("division_id", division.id)
-      .order("number", {
-        ascending: true,
-      });
+  const {
+    data: gameweeks,
+    error,
+  } = await supabase
+    .from("gameweeks")
+    .select(
+      "id,division_id,number,starts_at,created_at",
+    )
+    .eq(
+      "division_id",
+      division.id,
+    )
+    .order("number", {
+      ascending: true,
+    });
 
   if (error) {
     console.error(
@@ -1427,10 +1439,6 @@ async function checkDivision(
       );
 
     if (!complete) {
-      /*
-       * Don't skip ahead. Tables should appear
-       * in chronological GW order.
-       */
       break;
     }
 
@@ -1445,24 +1453,26 @@ async function checkDivision(
 export async function checkGameweekTables(
   client: Client,
 ) {
-  const { data: divisions, error } =
-    await supabase
-      .from("divisions")
-      .select(
-        [
-          "id",
-          "league_id",
-          "name",
-          "tier",
-          "season",
-          "status",
-          "gameweek_interval_days",
-        ].join(","),
-      )
-      .in("status", [
-        "active",
-        "running",
-      ]);
+  const {
+    data: divisions,
+    error,
+  } = await supabase
+    .from("divisions")
+    .select(
+      [
+        "id",
+        "league_id",
+        "name",
+        "tier",
+        "season",
+        "status",
+        "gameweek_interval_days",
+      ].join(","),
+    )
+    .in("status", [
+      "active",
+      "running",
+    ]);
 
   if (error) {
     console.error(
