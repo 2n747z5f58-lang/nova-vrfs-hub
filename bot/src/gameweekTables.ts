@@ -1484,7 +1484,7 @@ export async function checkGameweekTables(
   }
 
   for (const division of
-    (divisions ?? []) as unknown as Division[]
+    (divisions ?? []) as unknown as Division[]) {
     try {
       await checkDivision(
         client,
