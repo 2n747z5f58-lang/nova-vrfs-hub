@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Shield,
   Loader2,
@@ -9,6 +9,7 @@ import {
   Settings,
   ChevronDown,
   Check,
+  Lock,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -17,7 +18,11 @@ export const Route = createFileRoute("/admin")({
   component: Admin,
 });
 
-type LeagueTier = "unranked" | "elite" | "tier_2" | "tier_3";
+type PointsTier =
+  | "unranked"
+  | "elite"
+  | "tier_2"
+  | "tier_3";
 
 type League = {
   id: string;
@@ -27,10 +32,22 @@ type League = {
   description: string | null;
   season: string | null;
   status: string | null;
-  ranking_tier: LeagueTier;
 };
 
-const TIER_LABELS: Record<LeagueTier, string> = {
+type Division = {
+  id: string;
+  league_id: string;
+  name: string;
+  tier: number;
+  season: string | null;
+  status: string | null;
+  points_tier: PointsTier;
+};
+
+const POINTS_TIER_LABELS: Record<
+  PointsTier,
+  string
+> = {
   unranked: "Unranked",
   elite: "Elite",
   tier_2: "Tier 2",
@@ -43,13 +60,23 @@ function Admin() {
   const [checking, setChecking] = useState(true);
   const [allowed, setAllowed] = useState(false);
   const [isOwner, setIsOwner] = useState(false);
-  const [activeSection, setActiveSection] = useState("overview");
+
+  const [activeSection, setActiveSection] =
+    useState("overview");
+
   const [leagues, setLeagues] = useState<League[]>([]);
-  const [loadingLeagues, setLoadingLeagues] = useState(false);
-  const [savingLeague, setSavingLeague] = useState<string | null>(null);
+  const [divisions, setDivisions] = useState<Division[]>(
+    [],
+  );
+
+  const [loadingLeagues, setLoadingLeagues] =
+    useState(false);
+
+  const [savingDivision, setSavingDivision] =
+    useState<string | null>(null);
 
   useEffect(() => {
-    async function checkAdmin() {
+    async function checkAccess() {
       const {
         data: { user },
       } = await supabase.auth.getUser();
@@ -59,100 +86,153 @@ function Admin() {
         return;
       }
 
-      const role =
-        user.app_metadata?.role ??
-        user.user_metadata?.role;
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select(
+          "username, display_name, discord_username, discord_id",
+        )
+        .eq("id", user.id)
+        .maybeSingle();
 
-      const username =
-        user.user_metadata?.username ??
-        user.user_metadata?.display_name ??
-        "";
+      const { data: roles } = await supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", user.id);
 
-      const adminAccess = role === "admin";
+      const hasAdminRole =
+        roles?.some(
+          (role) => role.role === "admin",
+        ) ?? false;
+
+      const ownerValues = [
+        profile?.username,
+        profile?.display_name,
+        profile?.discord_username,
+        profile?.discord_id,
+        user.user_metadata?.username,
+        user.user_metadata?.discord_username,
+      ]
+        .filter(Boolean)
+        .map((value) =>
+          String(value).toLowerCase(),
+        );
+
       const ownerAccess =
-        username.toLowerCase() === "aa23fr";
-
-      if (adminAccess || ownerAccess) {
-        setAllowed(true);
-      }
+        ownerValues.includes("aa23fr");
 
       setIsOwner(ownerAccess);
+      setAllowed(
+        hasAdminRole || ownerAccess,
+      );
       setChecking(false);
     }
 
-    void checkAdmin();
+    void checkAccess();
   }, [navigate]);
 
   useEffect(() => {
-    if (activeSection !== "leagues" || !allowed) {
+    if (!allowed) {
       return;
     }
 
-    async function loadLeagues() {
-      setLoadingLeagues(true);
+    void loadData();
+  }, [allowed]);
 
-      const { data, error } = await supabase
+  async function loadData() {
+    setLoadingLeagues(true);
+
+    const [
+      { data: leagueData, error: leagueError },
+      { data: divisionData, error: divisionError },
+    ] = await Promise.all([
+      supabase
         .from("leagues")
         .select(
-          "id, name, slug, logo_url, description, season, status, ranking_tier",
+          "id, name, slug, logo_url, description, season, status",
         )
-        .order("name", { ascending: true });
+        .order("name", {
+          ascending: true,
+        }),
 
-      if (error) {
-        console.error("Failed to load leagues:", error);
-        setLeagues([]);
-      } else {
-        setLeagues(
-          (data ?? []).map((league) => ({
-            ...league,
-            ranking_tier:
-              league.ranking_tier ?? "unranked",
-          })),
-        );
-      }
+      supabase
+        .from("divisions")
+        .select(
+          "id, league_id, name, tier, season, status, points_tier",
+        )
+        .order("tier", {
+          ascending: true,
+        }),
+    ]);
 
-      setLoadingLeagues(false);
+    if (leagueError) {
+      console.error(
+        "Failed to load leagues:",
+        leagueError,
+      );
     }
 
-    void loadLeagues();
-  }, [activeSection, allowed]);
+    if (divisionError) {
+      console.error(
+        "Failed to load divisions:",
+        divisionError,
+      );
+    }
 
-  async function updateLeagueTier(
-    leagueId: string,
-    tier: LeagueTier,
+    setLeagues(leagueData ?? []);
+
+    setDivisions(
+      (divisionData ?? []).map(
+        (division) => ({
+          ...division,
+          points_tier:
+            division.points_tier ??
+            "unranked",
+        }),
+      ),
+    );
+
+    setLoadingLeagues(false);
+  }
+
+  async function updateDivisionPointsTier(
+    divisionId: string,
+    pointsTier: PointsTier,
   ) {
     if (!isOwner) {
       return;
     }
 
-    setSavingLeague(leagueId);
+    setSavingDivision(divisionId);
 
     const { error } = await supabase
-      .from("leagues")
+      .from("divisions")
       .update({
-        ranking_tier: tier,
+        points_tier: pointsTier,
       })
-      .eq("id", leagueId);
+      .eq("id", divisionId);
 
     if (error) {
       console.error(
-        "Failed to update league tier:",
+        "Failed to update division points tier:",
         error,
       );
-    } else {
-      setLeagues((current) =>
-        current.map((league) =>
-          league.id === leagueId
-            ? {
-                ...league,
-                ranking_tier: tier,
-              }
-            : league,
-        ),
-      );
+
+      setSavingDivision(null);
+      return;
     }
 
-    setSavingLeague(null);
+    setDivisions((current) =>
+      current.map((division) =>
+        division.id === divisionId
+          ? {
+              ...division,
+              points_tier: pointsTier,
+            }
+          : division,
+      ),
+    );
+
+    setSavingDivision(null);
   }
 
   if (checking) {
@@ -174,7 +254,8 @@ function Admin() {
           </h1>
 
           <p className="mt-3 text-sm leading-6 text-muted-foreground">
-            Your account doesn't have administrator permissions.
+            Your account doesn't have administrator
+            permissions.
           </p>
         </div>
       </main>
@@ -195,6 +276,7 @@ function Admin() {
                 <p className="text-sm font-bold">
                   NOVA
                 </p>
+
                 <p className="text-xs text-muted-foreground">
                   Control Panel
                 </p>
@@ -204,8 +286,12 @@ function Admin() {
 
           <nav className="flex-1 space-y-1 p-4">
             <NavButton
-              active={activeSection === "overview"}
-              icon={<LayoutDashboard className="size-4" />}
+              active={
+                activeSection === "overview"
+              }
+              icon={
+                <LayoutDashboard className="size-4" />
+              }
               label="Overview"
               onClick={() =>
                 setActiveSection("overview")
@@ -213,8 +299,12 @@ function Admin() {
             />
 
             <NavButton
-              active={activeSection === "leagues"}
-              icon={<Trophy className="size-4" />}
+              active={
+                activeSection === "leagues"
+              }
+              icon={
+                <Trophy className="size-4" />
+              }
               label="Leagues"
               onClick={() =>
                 setActiveSection("leagues")
@@ -222,8 +312,12 @@ function Admin() {
             />
 
             <NavButton
-              active={activeSection === "users"}
-              icon={<Users className="size-4" />}
+              active={
+                activeSection === "users"
+              }
+              icon={
+                <Users className="size-4" />
+              }
               label="Users & Roles"
               onClick={() =>
                 setActiveSection("users")
@@ -276,10 +370,12 @@ function Admin() {
                 </p>
 
                 <h1 className="mt-2 text-3xl font-bold tracking-tight">
-                  {activeSection === "overview" &&
+                  {activeSection ===
+                    "overview" &&
                     "Overview"}
 
-                  {activeSection === "leagues" &&
+                  {activeSection ===
+                    "leagues" &&
                     "Leagues"}
 
                   {activeSection === "users" &&
@@ -301,7 +397,9 @@ function Admin() {
           <div className="border-b border-border px-5 lg:hidden">
             <div className="flex gap-1 overflow-x-auto py-3">
               <MobileNavButton
-                active={activeSection === "overview"}
+                active={
+                  activeSection === "overview"
+                }
                 label="Overview"
                 onClick={() =>
                   setActiveSection("overview")
@@ -309,7 +407,9 @@ function Admin() {
               />
 
               <MobileNavButton
-                active={activeSection === "leagues"}
+                active={
+                  activeSection === "leagues"
+                }
                 label="Leagues"
                 onClick={() =>
                   setActiveSection("leagues")
@@ -317,7 +417,9 @@ function Admin() {
               />
 
               <MobileNavButton
-                active={activeSection === "users"}
+                active={
+                  activeSection === "users"
+                }
                 label="Users"
                 onClick={() =>
                   setActiveSection("users")
@@ -340,22 +442,37 @@ function Admin() {
 
           <section className="flex-1 px-5 py-8 lg:px-10">
             <div className="mx-auto max-w-[1440px]">
-              {activeSection === "overview" && (
+              {activeSection ===
+                "overview" && (
                 <Overview
                   isOwner={isOwner}
+                  leagueCount={
+                    leagues.length
+                  }
+                  divisionCount={
+                    divisions.length
+                  }
                   onLeagues={() =>
-                    setActiveSection("leagues")
+                    setActiveSection(
+                      "leagues",
+                    )
                   }
                 />
               )}
 
-              {activeSection === "leagues" && (
-                <Leagues
+              {activeSection ===
+                "leagues" && (
+                <LeagueManagement
                   leagues={leagues}
+                  divisions={divisions}
                   loading={loadingLeagues}
-                  savingLeague={savingLeague}
+                  savingDivision={
+                    savingDivision
+                  }
                   isOwner={isOwner}
-                  onTierChange={updateLeagueTier}
+                  onTierChange={
+                    updateDivisionPointsTier
+                  }
                 />
               )}
 
@@ -370,6 +487,14 @@ function Admin() {
                 isOwner && (
                   <OwnerSettings
                     leagues={leagues}
+                    divisions={divisions}
+                    isOwner={isOwner}
+                    savingDivision={
+                      savingDivision
+                    }
+                    onTierChange={
+                      updateDivisionPointsTier
+                    }
                   />
                 )}
             </div>
@@ -380,96 +505,27 @@ function Admin() {
   );
 }
 
-function Overview({
-  isOwner,
-  onLeagues,
-}: {
-  isOwner: boolean;
-  onLeagues: () => void;
-}) {
-  return (
-    <div>
-      <div className="grid gap-5 md:grid-cols-3">
-        <StatCard
-          title="Access"
-          value={isOwner ? "Owner" : "Admin"}
-          description="Current NOVA permissions"
-          icon={<Shield className="size-5" />}
-        />
-
-        <StatCard
-          title="League Management"
-          value="Ready"
-          description="League controls available"
-          icon={<Trophy className="size-5" />}
-        />
-
-        <StatCard
-          title="System"
-          value="NOVA"
-          description="VRFS league platform"
-          icon={
-            <LayoutDashboard className="size-5" />
-          }
-        />
-      </div>
-
-      <div className="mt-8 rounded-xl border border-border bg-card p-6">
-        <p className="text-xs font-bold uppercase tracking-[0.18em] text-muted-foreground">
-          Administration
-        </p>
-
-        <h2 className="mt-2 text-xl font-bold">
-          League control centre
-        </h2>
-
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-          Manage NOVA leagues and their platform-wide
-          classification from one place.
-        </p>
-
-        <button
-          type="button"
-          onClick={onLeagues}
-          className="mt-6 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
-        >
-          <Trophy className="size-4" />
-          Manage leagues
-        </button>
-
-        {isOwner && (
-          <div className="mt-6 rounded-lg border border-border bg-background p-4">
-            <p className="text-sm font-semibold">
-              Owner controls enabled
-            </p>
-
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">
-              Owner-only settings are hidden from normal
-              administrators.
-            </p>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function Leagues({
+function LeagueManagement({
   leagues,
+  divisions,
   loading,
-  savingLeague,
+  savingDivision,
   isOwner,
   onTierChange,
 }: {
   leagues: League[];
+  divisions: Division[];
   loading: boolean;
-  savingLeague: string | null;
+  savingDivision: string | null;
   isOwner: boolean;
   onTierChange: (
-    leagueId: string,
-    tier: LeagueTier,
+    divisionId: string,
+    tier: PointsTier,
   ) => void;
 }) {
+  const [openLeague, setOpenLeague] =
+    useState<string | null>(null);
+
   if (loading) {
     return (
       <div className="flex min-h-[300px] items-center justify-center">
@@ -480,86 +536,163 @@ function Leagues({
 
   return (
     <div>
-      <div className="mb-6">
+      <div className="mb-8">
         <p className="text-sm text-muted-foreground">
-          All leagues currently registered with NOVA.
+          Select a league to view its divisions and
+          configure division scoring tiers.
         </p>
       </div>
 
-      {leagues.length === 0 ? (
-        <div className="rounded-xl border border-border bg-card p-10 text-center">
-          <Trophy className="mx-auto size-8 text-muted-foreground" />
+      <div className="space-y-4">
+        {leagues.map((league) => {
+          const leagueDivisions =
+            divisions.filter(
+              (division) =>
+                division.league_id ===
+                league.id,
+            );
 
-          <h2 className="mt-4 font-semibold">
-            No leagues found
-          </h2>
+          const isOpen =
+            openLeague === league.id;
 
-          <p className="mt-2 text-sm text-muted-foreground">
-            Leagues will appear here once they are created.
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {leagues.map((league) => (
-            <LeagueCard
+          return (
+            <div
               key={league.id}
-              league={league}
-              saving={
-                savingLeague === league.id
-              }
-              isOwner={isOwner}
-              onTierChange={onTierChange}
-            />
-          ))}
-        </div>
-      )}
+              className="overflow-hidden rounded-xl border border-border bg-card"
+            >
+              <button
+                type="button"
+                onClick={() =>
+                  setOpenLeague(
+                    isOpen
+                      ? null
+                      : league.id,
+                  )
+                }
+                className="flex w-full items-center gap-4 p-5 text-left transition-colors hover:bg-muted/40"
+              >
+                <div className="grid size-12 shrink-0 place-items-center overflow-hidden rounded-lg border border-border bg-background">
+                  {league.logo_url ? (
+                    <img
+                      src={league.logo_url}
+                      alt=""
+                      className="size-full object-contain"
+                    />
+                  ) : (
+                    <Trophy className="size-5 text-muted-foreground" />
+                  )}
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <h2 className="font-semibold">
+                    {league.name}
+                  </h2>
+
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {leagueDivisions.length}{" "}
+                    division
+                    {leagueDivisions.length ===
+                    1
+                      ? ""
+                      : "s"}
+                    {league.status
+                      ? ` • ${league.status}`
+                      : ""}
+                  </p>
+                </div>
+
+                <ChevronDown
+                  className={`size-5 shrink-0 text-muted-foreground transition-transform ${
+                    isOpen
+                      ? "rotate-180"
+                      : ""
+                  }`}
+                />
+              </button>
+
+              {isOpen && (
+                <div className="border-t border-border p-5">
+                  {leagueDivisions.length ===
+                  0 ? (
+                    <div className="rounded-lg border border-dashed border-border p-8 text-center">
+                      <p className="text-sm text-muted-foreground">
+                        This league has no divisions.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {leagueDivisions.map(
+                        (division) => (
+                          <DivisionRow
+                            key={
+                              division.id
+                            }
+                            division={
+                              division
+                            }
+                            saving={
+                              savingDivision ===
+                              division.id
+                            }
+                            isOwner={
+                              isOwner
+                            }
+                            onTierChange={
+                              onTierChange
+                            }
+                          />
+                        ),
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
-function LeagueCard({
-  league,
+function DivisionRow({
+  division,
   saving,
   isOwner,
   onTierChange,
 }: {
-  league: League;
+  division: Division;
   saving: boolean;
   isOwner: boolean;
   onTierChange: (
-    leagueId: string,
-    tier: LeagueTier,
+    divisionId: string,
+    tier: PointsTier,
   ) => void;
 }) {
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="rounded-xl border border-border bg-card p-5">
-      <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex min-w-0 items-center gap-4">
-          <div className="grid size-12 shrink-0 place-items-center overflow-hidden rounded-lg border border-border bg-background">
-            {league.logo_url ? (
-              <img
-                src={league.logo_url}
-                alt=""
-                className="size-full object-contain"
-              />
-            ) : (
-              <Trophy className="size-5 text-muted-foreground" />
-            )}
-          </div>
+    <div className="rounded-lg border border-border bg-background p-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-3">
+            <span className="grid size-8 shrink-0 place-items-center rounded-md bg-muted text-xs font-bold">
+              {division.tier}
+            </span>
 
-          <div className="min-w-0">
-            <h2 className="truncate font-semibold">
-              {league.name}
-            </h2>
+            <div className="min-w-0">
+              <h3 className="truncate font-semibold">
+                {division.name}
+              </h3>
 
-            <p className="mt-1 text-xs text-muted-foreground">
-              {league.status ?? "Unknown"}{" "}
-              {league.season
-                ? `• ${league.season}`
-                : ""}
-            </p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Division Tier{" "}
+                {division.tier}
+                {division.status
+                  ? ` • ${division.status}`
+                  : ""}
+              </p>
+            </div>
           </div>
         </div>
 
@@ -567,47 +700,58 @@ function LeagueCard({
           <button
             type="button"
             disabled={!isOwner || saving}
-            onClick={() => setOpen(!open)}
-            className="flex min-w-[160px] items-center justify-between gap-3 rounded-lg border border-border bg-background px-4 py-2.5 text-sm font-semibold transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+            onClick={() =>
+              setOpen(!open)
+            }
+            className="flex min-w-[170px] items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-2.5 text-sm font-semibold transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
           >
             <span>
               {saving
                 ? "Saving..."
-                : TIER_LABELS[
-                    league.ranking_tier
+                : POINTS_TIER_LABELS[
+                    division.points_tier
                   ]}
             </span>
 
-            <ChevronDown className="size-4 text-muted-foreground" />
+            {isOwner ? (
+              <ChevronDown className="size-4 text-muted-foreground" />
+            ) : (
+              <Lock className="size-4 text-muted-foreground" />
+            )}
           </button>
 
           {open && isOwner && !saving && (
-            <div className="absolute right-0 z-20 mt-2 w-full min-w-[180px] overflow-hidden rounded-lg border border-border bg-card p-1 shadow-xl">
+            <div className="absolute right-0 z-30 mt-2 w-full min-w-[190px] overflow-hidden rounded-lg border border-border bg-card p-1 shadow-xl">
               {(
                 [
                   "unranked",
                   "elite",
                   "tier_2",
                   "tier_3",
-                ] as LeagueTier[]
+                ] as PointsTier[]
               ).map((tier) => (
                 <button
                   key={tier}
                   type="button"
                   onClick={() => {
                     setOpen(false);
+
                     onTierChange(
-                      league.id,
+                      division.id,
                       tier,
                     );
                   }}
                   className="flex w-full items-center justify-between rounded-md px-3 py-2.5 text-left text-sm transition-colors hover:bg-muted"
                 >
                   <span>
-                    {TIER_LABELS[tier]}
+                    {
+                      POINTS_TIER_LABELS[
+                        tier
+                      ]
+                    }
                   </span>
 
-                  {league.ranking_tier ===
+                  {division.points_tier ===
                     tier && (
                     <Check className="size-4" />
                   )}
@@ -618,45 +762,71 @@ function LeagueCard({
         </div>
       </div>
 
-      {league.description && (
-        <p className="mt-4 border-t border-border pt-4 text-sm leading-6 text-muted-foreground">
-          {league.description}
+      <div className="mt-3 border-t border-border pt-3">
+        <p className="text-xs text-muted-foreground">
+          Points tier:{" "}
+          <span className="font-semibold text-foreground">
+            {
+              POINTS_TIER_LABELS[
+                division.points_tier
+              ]
+            }
+          </span>
         </p>
-      )}
 
-      {!isOwner && (
-        <p className="mt-4 text-xs text-muted-foreground">
-          League classification is controlled by the NOVA
-          owner.
-        </p>
-      )}
+        {!isOwner && (
+          <p className="mt-1 text-xs text-muted-foreground">
+            Only the NOVA owner can change scoring tiers.
+          </p>
+        )}
+      </div>
     </div>
   );
 }
 
 function OwnerSettings({
   leagues,
+  divisions,
+  isOwner,
+  savingDivision,
+  onTierChange,
 }: {
   leagues: League[];
+  divisions: Division[];
+  isOwner: boolean;
+  savingDivision: string | null;
+  onTierChange: (
+    divisionId: string,
+    tier: PointsTier,
+  ) => void;
 }) {
-  const counts = {
-    elite: leagues.filter(
-      (league) =>
-        league.ranking_tier === "elite",
-    ).length,
-    tier2: leagues.filter(
-      (league) =>
-        league.ranking_tier === "tier_2",
-    ).length,
-    tier3: leagues.filter(
-      (league) =>
-        league.ranking_tier === "tier_3",
-    ).length,
-    unranked: leagues.filter(
-      (league) =>
-        league.ranking_tier === "unranked",
-    ).length,
-  };
+  const counts = useMemo(() => {
+    return {
+      elite: divisions.filter(
+        (division) =>
+          division.points_tier ===
+          "elite",
+      ).length,
+
+      tier2: divisions.filter(
+        (division) =>
+          division.points_tier ===
+          "tier_2",
+      ).length,
+
+      tier3: divisions.filter(
+        (division) =>
+          division.points_tier ===
+          "tier_3",
+      ).length,
+
+      unranked: divisions.filter(
+        (division) =>
+          division.points_tier ===
+          "unranked",
+      ).length,
+    };
+  }, [divisions]);
 
   return (
     <div>
@@ -672,12 +842,14 @@ function OwnerSettings({
             </p>
 
             <h2 className="mt-1 text-xl font-bold">
-              NOVA league classification
+              Division scoring tiers
             </h2>
 
             <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-              Platform-wide league tiers are controlled
-              here. New leagues are Unranked by default.
+              Each division can use a different NOVA scoring
+              tier. The selected tier will determine how
+              player actions such as goals, assists, clean
+              sheets and other statistics are scored.
             </p>
           </div>
         </div>
@@ -704,6 +876,104 @@ function OwnerSettings({
           value={counts.unranked}
         />
       </div>
+
+      <div className="mt-8">
+        <LeagueManagement
+          leagues={leagues}
+          divisions={divisions}
+          loading={false}
+          savingDivision={savingDivision}
+          isOwner={isOwner}
+          onTierChange={onTierChange}
+        />
+      </div>
+    </div>
+  );
+}
+
+function Overview({
+  isOwner,
+  leagueCount,
+  divisionCount,
+  onLeagues,
+}: {
+  isOwner: boolean;
+  leagueCount: number;
+  divisionCount: number;
+  onLeagues: () => void;
+}) {
+  return (
+    <div>
+      <div className="grid gap-5 md:grid-cols-3">
+        <StatCard
+          title="Access"
+          value={
+            isOwner ? "Owner" : "Admin"
+          }
+          description="Current NOVA permissions"
+          icon={
+            <Shield className="size-5" />
+          }
+        />
+
+        <StatCard
+          title="Leagues"
+          value={String(leagueCount)}
+          description="Registered NOVA leagues"
+          icon={
+            <Trophy className="size-5" />
+          }
+        />
+
+        <StatCard
+          title="Divisions"
+          value={String(
+            divisionCount,
+          )}
+          description="Across all leagues"
+          icon={
+            <LayoutDashboard className="size-5" />
+          }
+        />
+      </div>
+
+      <div className="mt-8 rounded-xl border border-border bg-card p-6">
+        <p className="text-xs font-bold uppercase tracking-[0.18em] text-muted-foreground">
+          Administration
+        </p>
+
+        <h2 className="mt-2 text-xl font-bold">
+          Division scoring control
+        </h2>
+
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+          Every league can contain multiple divisions,
+          and each division can have its own NOVA scoring
+          tier.
+        </p>
+
+        <button
+          type="button"
+          onClick={onLeagues}
+          className="mt-6 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
+        >
+          <Trophy className="size-4" />
+          Manage divisions
+        </button>
+
+        {isOwner && (
+          <div className="mt-6 rounded-lg border border-border bg-background p-4">
+            <p className="text-sm font-semibold">
+              Owner controls enabled
+            </p>
+
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              You can assign scoring tiers to individual
+              divisions.
+            </p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -726,7 +996,7 @@ function TierSummary({
       </p>
 
       <p className="mt-1 text-xs text-muted-foreground">
-        league{value === 1 ? "" : "s"}
+        division{value === 1 ? "" : "s"}
       </p>
     </div>
   );
