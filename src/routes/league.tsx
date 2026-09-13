@@ -1,48 +1,39 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useEffect, useMemo, useState } from "react";
 import {
-  CalendarDays,
+  ArrowRight,
   Check,
-  ChevronRight,
   CircleAlert,
-  Clock,
   Loader2,
-  RefreshCw,
+  Plus,
+  Search,
+  Settings,
   Shield,
-  Trophy,
+  Trash2,
   Users,
-  X,
+  Wallet,
+  Radio,
+  CalendarDays,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
-
 type League = {
   id: string;
   name: string;
   slug: string | null;
   status: string | null;
-  logo_url: string | null;
-  description: string | null;
-  season: string | null;
+  logo_url?: string | null;
+  description?: string | null;
+  season?: string | null;
 };
-
 type Division = {
   id: string;
   league_id: string;
   name: string;
-  tier: number | null;
-  season: string | null;
-  status: string | null;
-  start_date: string | null;
-  ended_at: string | null;
-  gameweek_interval_days: number | null;
-  points_tier:
-    | "unranked"
-    | "elite"
-    | "tier_2"
-    | "tier_3"
-    | null;
+  tier?: number | null;
+  season?: string | null;
+  status?: string | null;
+  gameweek_interval_days?: number | null;
 };
-
 type Team = {
   id: string;
   name: string;
@@ -52,3523 +43,2080 @@ type Team = {
   division_id: string | null;
   manager_id: string | null;
 };
-
 type Profile = {
   id: string;
-  username: string | null;
   display_name: string | null;
-  discord_id: string | null;
+  username: string | null;
+  discord_id?: string | null;
 };
-
 type LeagueMember = {
-  id: string;
+  id?: string;
   league_id: string;
-  user_id: string;
+  user_id?: string;
   role: "overseer" | "co_overseer";
 };
-
-type TeamStaff = {
-  id: string;
-  team_id: string;
-  user_id: string;
-  role: string;
+type LeagueSettings = {
+  league_id: string;
+  max_roster_size: number | null;
+  default_transfer_budget: number | null;
+  transfer_window_start: string | null;
+  transfer_window_end: string | null;
+  gameweek_interval_days: number | null;
 };
-
-type Fixture = {
+type ChannelSettings = {
+  league_id: string;
+  fixtures_channel_id: string | null;
+  results_channel_id: string | null;
+  table_channel_id: string | null;
+  signings_channel_id: string | null;
+  releases_channel_id: string | null;
+  budgets_channel_id: string | null;
+  transfers_channel_id: string | null;
+  loans_channel_id: string | null;
+  transfer_window_channel_id: string | null;
+  announcements_channel_id: string | null;
+};
+type DiscordRoleOption = {
   id: string;
+  name: string;
+  position?: number;
+  color?: string;
+  managed?: boolean;
+};
+type DiscordChannelOption = {
+  id: string;
+  name: string;
+  type: number;
+  position?: number;
+  parent_id?: string | null;
+};
+type GuildSettings = {
+  guild_id: string;
+  guild_name: string | null;
   league_id: string | null;
-  division_id: string | null;
-  gameweek: number | null;
-  kickoff_at: string;
-  deadline_at: string | null;
-  status: string;
-  home_score: number | null;
-  away_score: number | null;
-  home_team_id: string | null;
-  away_team_id: string | null;
-  completion_source: string | null;
-  completion_note: string | null;
-  completed_at: string | null;
+  manager_role_id: string | null;
+  co_manager_role_id: string | null;
+  discord_roles?: DiscordRoleOption[] | null;
+  discord_channels?: DiscordChannelOption[] | null;
 };
-
-type Result = {
-  fixture_id: string;
-  home_score: number;
-  away_score: number;
-  notes: string | null;
-  recorded_at: string;
-  submitted_by: string | null;
-  replay_code: string | null;
-};
-
-type Standing = {
-  id: string;
-  division_id: string;
-  team_id: string;
-  played: number;
-  won: number;
-  drawn: number;
-  lost: number;
-  goals_for: number;
-  goals_against: number;
-  goal_difference: number;
-  points: number;
-};
-
-type PointAdjustment = {
-  id: string;
-  division_id: string;
-  team_id: string;
-  points_delta: number;
-  reason: string;
-  applied_by: string | null;
-  created_at: string;
-};
-
 type Section =
   | "overview"
-  | "fixtures"
-  | "results"
-  | "table"
   | "teams"
   | "divisions"
-  | "deductions"
+  | "settings"
+  | "transfers"
+  | "discord"
   | "overseers";
-
-const OWNER_IDENTIFIER = "aa23fr";
-
+const NOVA_OWNER_IDENTIFIER = "aa23fr";
 const TIER_OPTIONS = [
-  { value: "unranked", label: "Unranked" },
-  { value: "elite", label: "Elite" },
-  { value: "tier_2", label: "Tier 2" },
-  { value: "tier_3", label: "Tier 3" },
-] as const;
-
+  { value: 1, label: "Elite" },
+  { value: 2, label: "Tier 2" },
+  { value: 3, label: "Tier 3" },
+];
+function getTierLabel(tier: number | null | undefined) {
+  return (
+    TIER_OPTIONS.find((option) => option.value === tier)?.label ?? "Elite"
+  );
+}
 export const Route = createFileRoute("/league")({
   ssr: false,
   component: LeaguePanel,
 });
-
 function LeaguePanel() {
   const navigate = useNavigate();
-
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
-
+  const [savingDiscordRoles, setSavingDiscordRoles] = useState(false);
+  const [accessDenied, setAccessDenied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [league, setLeague] = useState<League | null>(null);
-  const [divisions, setDivisions] = useState<Division[]>([]);
-  const [teams, setTeams] = useState<Team[]>([]);
-  const [profiles, setProfiles] = useState<Record<string, Profile>>({});
-  const [members, setMembers] = useState<LeagueMember[]>([]);
-  const [teamStaff, setTeamStaff] = useState<TeamStaff[]>([]);
-  const [fixtures, setFixtures] = useState<Fixture[]>([]);
-  const [results, setResults] = useState<Result[]>([]);
-  const [standings, setStandings] = useState<Standing[]>([]);
-  const [adjustments, setAdjustments] = useState<PointAdjustment[]>([]);
-
-  const [userId, setUserId] = useState<string | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [isOwner, setIsOwner] = useState(false);
   const [memberRole, setMemberRole] = useState<
     "overseer" | "co_overseer" | null
   >(null);
-
+  const [isNovaAdmin, setIsNovaAdmin] = useState(false);
+  const [isNovaOwner, setIsNovaOwner] = useState(false);
+  const [divisions, setDivisions] = useState<Division[]>([]);
+  const [confirmedTeams, setConfirmedTeams] = useState<Team[]>([]);
+  const [profiles, setProfiles] = useState<Record<string, Profile>>({});
+  const [members, setMembers] = useState<LeagueMember[]>([]);
+  const [settings, setSettings] = useState<LeagueSettings>({
+    league_id: "",
+    max_roster_size: 20,
+    default_transfer_budget: 0,
+    transfer_window_start: null,
+    transfer_window_end: null,
+    gameweek_interval_days: 3,
+  });
+  const [channels, setChannels] = useState<ChannelSettings>({
+    league_id: "",
+    fixtures_channel_id: null,
+    results_channel_id: null,
+    table_channel_id: null,
+    signings_channel_id: null,
+    releases_channel_id: null,
+    budgets_channel_id: null,
+    transfers_channel_id: null,
+    loans_channel_id: null,
+    transfer_window_channel_id: null,
+    announcements_channel_id: null,
+  });
+  const [guildSettings, setGuildSettings] =
+    useState<GuildSettings | null>(null);
+  const [discordRoles, setDiscordRoles] = useState<DiscordRoleOption[]>([]);
+  const [discordChannels, setDiscordChannels] = useState<
+    DiscordChannelOption[]
+  >([]);
+  const [managerRoleId, setManagerRoleId] = useState("");
+  const [coManagerRoleId, setCoManagerRoleId] = useState("");
+  const [teamSearch, setTeamSearch] = useState("");
+  const [teamResults, setTeamResults] = useState<Team[]>([]);
+  const [searchingTeams, setSearchingTeams] = useState(false);
+  const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
+  const [selectedDivisionId, setSelectedDivisionId] = useState("");
+  const [savingTeam, setSavingTeam] = useState(false);
+  const [newDivisionName, setNewDivisionName] = useState("");
+  const [creatingDivision, setCreatingDivision] = useState(false);
+  const [newCoOverseer, setNewCoOverseer] = useState("");
+  const [memberSearchResults, setMemberSearchResults] = useState<Profile[]>(
+    [],
+  );
+  const [searchingMembers, setSearchingMembers] = useState(false);
   const [activeSection, setActiveSection] =
     useState<Section>("overview");
-
-  const [selectedDivisionId, setSelectedDivisionId] =
-    useState("all");
-
-  const [selectedFixtureId, setSelectedFixtureId] =
-    useState<string | null>(null);
-
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-
-  const [newDivisionName, setNewDivisionName] = useState("");
-  const [newDivisionTier, setNewDivisionTier] = useState("1");
-
-  const [deductionDivisionId, setDeductionDivisionId] =
-    useState("");
-  const [deductionTeamId, setDeductionTeamId] =
-    useState("");
-  const [deductionAmount, setDeductionAmount] =
-    useState("");
-  const [deductionReason, setDeductionReason] =
-    useState("");
-
-  const [newOverseerUsername, setNewOverseerUsername] =
-    useState("");
-
-  const canManageLeague =
-    isOwner ||
-    isAdmin ||
-    memberRole === "overseer" ||
-    memberRole === "co_overseer";
-
-  const teamMap = useMemo(() => {
-    const map: Record<string, Team> = {};
-
-    for (const team of teams) {
-      map[team.id] = team;
-    }
-
-    return map;
-  }, [teams]);
-
-  const divisionMap = useMemo(() => {
-    const map: Record<string, Division> = {};
-
-    for (const division of divisions) {
-      map[division.id] = division;
-    }
-
-    return map;
-  }, [divisions]);
-
-  const profileMap = profiles;
-
-  const visibleFixtures = useMemo(() => {
-    if (selectedDivisionId === "all") {
-      return fixtures;
-    }
-
-    return fixtures.filter(
-      (fixture) =>
-        fixture.division_id === selectedDivisionId,
-    );
-  }, [fixtures, selectedDivisionId]);
-
-  const visibleStandings = useMemo(() => {
-    if (selectedDivisionId === "all") {
-      return standings;
-    }
-
-    return standings.filter(
-      (standing) =>
-        standing.division_id === selectedDivisionId,
-    );
-  }, [standings, selectedDivisionId]);
-
-  const visibleAdjustments = useMemo(() => {
-    if (selectedDivisionId === "all") {
-      return adjustments;
-    }
-
-    return adjustments.filter(
-      (adjustment) =>
-        adjustment.division_id === selectedDivisionId,
-    );
-  }, [adjustments, selectedDivisionId]);
-
-  const completedFixtures = useMemo(
-    () =>
-      visibleFixtures.filter(
-        (fixture) =>
-          fixture.status === "completed",
-      ),
-    [visibleFixtures],
-  );
-
-  const scheduledFixtures = useMemo(
-    () =>
-      visibleFixtures.filter(
-        (fixture) =>
-          fixture.status !== "completed",
-      ),
-    [visibleFixtures],
-  );
-
+  const canManageTiers = isNovaAdmin || isNovaOwner;
   useEffect(() => {
     void loadPanel();
   }, []);
-
-  async function loadPanel(showSpinner = true) {
+  async function loadPanel() {
     try {
-      if (showSpinner) {
-        setLoading(true);
-      } else {
-        setRefreshing(true);
-      }
-
+      setLoading(true);
       setError(null);
-
       const {
         data: { user },
       } = await supabase.auth.getUser();
-
       if (!user) {
         void navigate({ to: "/auth" });
         return;
       }
-
-      setUserId(user.id);
-
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select(
-          "id,username,display_name,discord_id",
-        )
-        .eq("id", user.id)
-        .maybeSingle();
-
-      const owner =
-        user.id === OWNER_IDENTIFIER ||
-        profile?.username === OWNER_IDENTIFIER ||
-        profile?.discord_id === OWNER_IDENTIFIER;
-
-      setIsOwner(owner);
-
-      const { data: roleRows } = await supabase
+      let admin = false;
+      let owner = false;
+      const { data: roleData } = await supabase
         .from("user_roles")
         .select("role")
         .eq("user_id", user.id);
-
-      const admin = (roleRows ?? []).some(
-        (row) =>
-          String(row.role).toLowerCase() === "admin",
+      admin = (roleData ?? []).some(
+        (row) => String(row.role).toLowerCase() === "admin",
       );
-
-      setIsAdmin(admin);
-
-      const {
-        data: membershipRows,
-        error: membershipError,
-      } = await supabase
-        .from("league_members")
-        .select(
-          "id,league_id,user_id,role",
-        )
-        .eq("user_id", user.id)
-        .in("role", [
-          "overseer",
-          "co_overseer",
-        ]);
-
-      if (membershipError) {
-        throw new Error(
-          membershipError.message,
-        );
-      }
-
-      const memberships =
-        (membershipRows ?? []) as LeagueMember[];
-
+      const { data: ownerProfile } = await supabase
+        .from("profiles")
+        .select("id,username,discord_id")
+        .eq("id", user.id)
+        .maybeSingle();
       if (
-        memberships.length === 0 &&
-        !admin &&
-        !owner
+        user.id === NOVA_OWNER_IDENTIFIER ||
+        ownerProfile?.username === NOVA_OWNER_IDENTIFIER ||
+        ownerProfile?.discord_id === NOVA_OWNER_IDENTIFIER
       ) {
+        owner = true;
+      }
+      setIsNovaAdmin(admin);
+      setIsNovaOwner(owner);
+      const { data: memberships, error: membershipError } =
+        await supabase
+          .from("league_members")
+          .select("id,league_id,user_id,role")
+          .eq("user_id", user.id)
+          .in("role", ["overseer", "co_overseer"]);
+      if (membershipError) {
         setError(
-          "You don't have access to the League Panel.",
+          `Couldn't check league permissions: ${membershipError.message}`,
         );
         return;
       }
-
-      let membership =
-        memberships[0] ?? null;
-
-      if (!membership && (admin || owner)) {
-        const {
-          data: fallbackMembership,
-        } = await supabase
+      const memberRows = (memberships ?? []) as LeagueMember[];
+      if (memberRows.length === 0 && !admin && !owner) {
+        setAccessDenied(true);
+        return;
+      }
+      let membership = memberRows[0];
+      if (!membership) {
+        const { data: firstLeagueMember } = await supabase
           .from("league_members")
-          .select(
-            "id,league_id,user_id,role",
-          )
-          .order("created_at", {
-            ascending: true,
-          })
+          .select("id,league_id,user_id,role")
+          .order("created_at", { ascending: true })
           .limit(1)
           .maybeSingle();
-
-        membership =
-          (fallbackMembership as LeagueMember | null) ??
-          null;
+        if (!firstLeagueMember) {
+          setAccessDenied(true);
+          return;
+        }
+        membership = firstLeagueMember as LeagueMember;
       }
-
-      if (!membership) {
-        throw new Error(
-          "No league is available for this account.",
-        );
-      }
-
-      setMemberRole(membership.role);
-
-      const leagueId = membership.league_id;
-
-      const [
-        leagueResponse,
-        divisionsResponse,
-        teamsResponse,
-        membersResponse,
-        staffResponse,
-        fixturesResponse,
-        standingsResponse,
-        resultsResponse,
-        adjustmentResponse,
-      ] = await Promise.all([
-        supabase
+      const { data: leagueData, error: leagueError } =
+        await supabase
           .from("leagues")
-          .select(
-            "id,name,slug,status,logo_url,description,season",
-          )
-          .eq("id", leagueId)
-          .maybeSingle(),
-
+          .select("id,name,slug,status,logo_url,description,season")
+          .eq("id", membership.league_id)
+          .maybeSingle();
+      if (leagueError) {
+        setError(`Couldn't load your league: ${leagueError.message}`);
+        return;
+      }
+      if (!leagueData) {
+        setError("Your league could not be found.");
+        return;
+      }
+      const currentLeague = leagueData as League;
+      setLeague(currentLeague);
+      setMemberRole(membership.role);
+      const [
+        divisionResponse,
+        teamResponse,
+        settingsResponse,
+        channelResponse,
+        membersResponse,
+        guildSettingsResponse,
+      ] = await Promise.all([
         supabase
           .from("divisions")
           .select(
-            "id,league_id,name,tier,season,status,start_date,ended_at,gameweek_interval_days,points_tier",
+            "id,league_id,name,tier,season,status,gameweek_interval_days",
           )
-          .eq("league_id", leagueId)
-          .order("tier", {
-            ascending: true,
-          })
-          .order("name", {
-            ascending: true,
-          }),
-
+          .eq("league_id", currentLeague.id)
+          .order("tier", { ascending: true })
+          .order("name", { ascending: true }),
         supabase
           .from("teams")
           .select(
             "id,name,short_name,logo_url,league_id,division_id,manager_id",
           )
-          .eq("league_id", leagueId)
-          .order("name", {
-            ascending: true,
-          }),
-
+          .eq("league_id", currentLeague.id)
+          .order("name", { ascending: true }),
+        supabase
+          .from("league_settings")
+          .select(
+            "league_id,max_roster_size,default_transfer_budget,transfer_window_start,transfer_window_end,gameweek_interval_days",
+          )
+          .eq("league_id", currentLeague.id)
+          .maybeSingle(),
+        supabase
+          .from("league_channel_settings")
+          .select(
+            "league_id,fixtures_channel_id,results_channel_id,table_channel_id,signings_channel_id,releases_channel_id,budgets_channel_id,transfers_channel_id,loans_channel_id,transfer_window_channel_id,announcements_channel_id",
+          )
+          .eq("league_id", currentLeague.id)
+          .maybeSingle(),
         supabase
           .from("league_members")
-          .select(
-            "id,league_id,user_id,role",
-          )
-          .eq("league_id", leagueId)
-          .order("role", {
-            ascending: true,
-          }),
-
+          .select("id,league_id,user_id,role")
+          .eq("league_id", currentLeague.id)
+          .order("role", { ascending: true }),
         supabase
-          .from("team_staff")
+          .from("guild_settings")
           .select(
-            "id,team_id,user_id,role",
-          ),
-
-        supabase
-          .from("fixtures")
-          .select(
-            "id,league_id,division_id,gameweek,kickoff_at,deadline_at,status,home_score,away_score,home_team_id,away_team_id,completion_source,completion_note,completed_at",
+            "guild_id,guild_name,league_id,manager_role_id,co_manager_role_id,discord_roles,discord_channels",
           )
-          .eq("league_id", leagueId)
-          .order("kickoff_at", {
-            ascending: true,
-          }),
-
-        supabase
-          .from("standings")
-          .select(
-            "id,division_id,team_id,played,won,drawn,lost,goals_for,goals_against,goal_difference,points",
-          )
-          .order("points", {
-            ascending: false,
-          }),
-
-        supabase
-          .from("results")
-          .select(
-            "fixture_id,home_score,away_score,notes,recorded_at,submitted_by,replay_code",
-          )
-          .order("recorded_at", {
-            ascending: false,
-          }),
-
-        supabase
-          .from("standings_point_adjustments")
-          .select(
-            "id,division_id,team_id,points_delta,reason,applied_by,created_at",
-          )
-          .order("created_at", {
-            ascending: false,
-          }),
+          .eq("league_id", currentLeague.id)
+          .limit(1)
+          .maybeSingle(),
       ]);
-
-      if (leagueResponse.error) {
-        throw new Error(
-          leagueResponse.error.message,
+      if (divisionResponse.error) {
+        setError(
+          `Couldn't load divisions: ${divisionResponse.error.message}`,
         );
+        return;
       }
-
-      if (divisionsResponse.error) {
-        throw new Error(
-          divisionsResponse.error.message,
+      if (teamResponse.error) {
+        setError(`Couldn't load teams: ${teamResponse.error.message}`);
+        return;
+      }
+      setDivisions((divisionResponse.data ?? []) as Division[]);
+      setConfirmedTeams((teamResponse.data ?? []) as Team[]);
+      if (settingsResponse.error) {
+        console.warn(
+          "League settings could not be loaded:",
+          settingsResponse.error,
         );
+      } else if (settingsResponse.data) {
+        setSettings({
+          ...(settingsResponse.data as LeagueSettings),
+          gameweek_interval_days:
+            settingsResponse.data.gameweek_interval_days ?? 3,
+        });
+      } else {
+        setSettings({
+          league_id: currentLeague.id,
+          max_roster_size: 20,
+          default_transfer_budget: 0,
+          transfer_window_start: null,
+          transfer_window_end: null,
+          gameweek_interval_days: 3,
+        });
       }
-
-      if (teamsResponse.error) {
-        throw new Error(
-          teamsResponse.error.message,
+      if (!channelResponse.error && channelResponse.data) {
+        setChannels(channelResponse.data as ChannelSettings);
+      } else {
+        setChannels({
+          league_id: currentLeague.id,
+          fixtures_channel_id: null,
+          results_channel_id: null,
+          table_channel_id: null,
+          signings_channel_id: null,
+          releases_channel_id: null,
+          budgets_channel_id: null,
+          transfers_channel_id: null,
+          loans_channel_id: null,
+          transfer_window_channel_id: null,
+          announcements_channel_id: null,
+        });
+      }
+      if (!guildSettingsResponse.error && guildSettingsResponse.data) {
+        const guild = guildSettingsResponse.data as GuildSettings;
+        setGuildSettings(guild);
+        setManagerRoleId(guild.manager_role_id ?? "");
+        setCoManagerRoleId(guild.co_manager_role_id ?? "");
+        setDiscordRoles(
+          Array.isArray(guild.discord_roles)
+            ? guild.discord_roles
+            : [],
         );
-      }
-
-      if (membersResponse.error) {
-        throw new Error(
-          membersResponse.error.message,
+        setDiscordChannels(
+          Array.isArray(guild.discord_channels)
+            ? guild.discord_channels
+            : [],
         );
+      } else {
+        setGuildSettings(null);
+        setManagerRoleId("");
+        setCoManagerRoleId("");
+        setDiscordRoles([]);
+        setDiscordChannels([]);
       }
-
-      if (staffResponse.error) {
-        throw new Error(
-          staffResponse.error.message,
-        );
-      }
-
-      if (fixturesResponse.error) {
-        throw new Error(
-          fixturesResponse.error.message,
-        );
-      }
-
-      if (standingsResponse.error) {
-        throw new Error(
-          standingsResponse.error.message,
-        );
-      }
-
-      if (resultsResponse.error) {
-        throw new Error(
-          resultsResponse.error.message,
-        );
-      }
-
-      if (adjustmentResponse.error) {
-        throw new Error(
-          adjustmentResponse.error.message,
-        );
-      }
-
-      const loadedLeague =
-        leagueResponse.data as League | null;
-
-      if (!loadedLeague) {
-        throw new Error(
-          "The league could not be found.",
-        );
-      }
-
-      const loadedDivisions =
-        (divisionsResponse.data ?? []) as Division[];
-
-      const loadedTeams =
-        (teamsResponse.data ?? []) as Team[];
-
-      const loadedMembers =
-        (membersResponse.data ?? []) as LeagueMember[];
-
-      const loadedStaff =
-        (staffResponse.data ?? []) as TeamStaff[];
-
-      const loadedFixtures =
-        (fixturesResponse.data ?? []) as Fixture[];
-
-      const loadedStandings =
-        (standingsResponse.data ?? []) as Standing[];
-
-      const loadedResults =
-        (resultsResponse.data ?? []) as Result[];
-
-      const loadedAdjustments =
-        (adjustmentResponse.data ?? []) as PointAdjustment[];
-
-      setLeague(loadedLeague);
-      setDivisions(loadedDivisions);
-      setTeams(loadedTeams);
-      setMembers(loadedMembers);
-      setTeamStaff(loadedStaff);
-      setFixtures(loadedFixtures);
-      setStandings(loadedStandings);
-      setResults(loadedResults);
-      setAdjustments(loadedAdjustments);
-
+      const memberList = (membersResponse.data ?? []) as LeagueMember[];
+      setMembers(memberList);
+      const managerIds = (teamResponse.data ?? [])
+        .map((team) => (team as Team).manager_id)
+        .filter((id): id is string => Boolean(id));
+      const memberIds = memberList
+        .map((member) => member.user_id)
+        .filter((id): id is string => Boolean(id));
       const profileIds = [
-        ...new Set(
-          [
-            ...loadedMembers.map(
-              (member) => member.user_id,
-            ),
-            ...loadedTeams
-              .map(
-                (team) =>
-                  team.manager_id,
-              )
-              .filter(Boolean),
-            ...loadedStaff
-              .map(
-                (staff) =>
-                  staff.user_id,
-              )
-              .filter(Boolean),
-            ...loadedAdjustments
-              .map(
-                (adjustment) =>
-                  adjustment.applied_by,
-              )
-              .filter(Boolean),
-          ].filter(
-            (id): id is string =>
-              Boolean(id),
-          ),
-        ),
+        ...new Set([...managerIds, ...memberIds]),
       ];
-
       if (profileIds.length > 0) {
-        const {
-          data: profileRows,
-          error: profileError,
-        } = await supabase
+        const { data: profileData } = await supabase
           .from("profiles")
-          .select(
-            "id,username,display_name,discord_id",
-          )
+          .select("id,display_name,username,discord_id")
           .in("id", profileIds);
-
-        if (profileError) {
-          throw new Error(
-            profileError.message,
-          );
+        const profileMap: Record<string, Profile> = {};
+        for (const profile of (profileData ?? []) as Profile[]) {
+          profileMap[profile.id] = profile;
         }
-
-        const nextProfiles: Record<
-          string,
-          Profile
-        > = {};
-
-        for (const row of (profileRows ??
-          []) as Profile[]) {
-          nextProfiles[row.id] = row;
-        }
-
-        setProfiles(nextProfiles);
+        setProfiles(profileMap);
       } else {
         setProfiles({});
       }
     } catch (err) {
       console.error(err);
-
       setError(
         err instanceof Error
           ? err.message
-          : "Couldn't load the League Panel.",
+          : "Something went wrong while loading the League Panel.",
       );
     } finally {
       setLoading(false);
-      setRefreshing(false);
     }
   }
-
-  async function saveFixtureDeadline(
-    fixtureId: string,
-    deadline: string,
-  ) {
-    if (!canManageLeague) {
+  async function saveDiscordRoles() {
+    if (!league) return;
+    if (!guildSettings?.guild_id) {
+      setError(
+        "No Discord server is connected to this league yet. Run /setup in the league's Discord server first.",
+      );
       return;
     }
-
-    setSaving(true);
+    setSavingDiscordRoles(true);
     setError(null);
     setSuccess(null);
-
-    try {
-      const deadlineValue = deadline
-        ? new Date(deadline).toISOString()
-        : null;
-
-      const { error: updateError } =
-        await supabase
-          .from("fixtures")
-          .update({
-            deadline_at: deadlineValue,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", fixtureId);
-
-      if (updateError) {
-        throw new Error(
-          updateError.message,
-        );
-      }
-
-      setSuccess(
-        "Fixture deadline updated.",
-      );
-
-      await loadPanel(false);
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Couldn't update the fixture deadline.",
-      );
-    } finally {
-      setSaving(false);
+    const payload = {
+      manager_role_id: managerRoleId || null,
+      co_manager_role_id: coManagerRoleId || null,
+    };
+    const { data, error: saveError } = await supabase
+      .from("guild_settings")
+      .update(payload)
+      .eq("guild_id", guildSettings.guild_id)
+      .eq("league_id", league.id)
+      .select(
+        "guild_id,guild_name,league_id,manager_role_id,co_manager_role_id,discord_roles,discord_channels",
+      )
+      .single();
+    if (saveError) {
+      setError(`Couldn't save Discord roles: ${saveError.message}`);
+      setSavingDiscordRoles(false);
+      return;
     }
+    const updatedGuild = data as GuildSettings;
+    setGuildSettings(updatedGuild);
+    setManagerRoleId(updatedGuild.manager_role_id ?? "");
+    setCoManagerRoleId(updatedGuild.co_manager_role_id ?? "");
+    setSavingDiscordRoles(false);
+    setSuccess("Manager and Co-Manager Discord roles saved.");
   }
-
-  async function overrideFixture(
-    fixture: Fixture,
-  ) {
-    if (!canManageLeague) {
-      return;
-    }
-
-    if (
-      fixture.status === "completed"
-    ) {
-      setError(
-        "This fixture is already completed.",
-      );
-      return;
-    }
-
-    const confirmed = window.confirm(
-      `Complete ${teamName(fixture.home_team_id)} vs ${teamName(fixture.away_team_id)} as 0-0?`,
-    );
-
-    if (!confirmed) {
-      return;
-    }
-
-    setSaving(true);
-    setError(null);
-    setSuccess(null);
-
-    try {
-      const now =
-        new Date().toISOString();
-
-      const {
-        error: fixtureError,
-      } = await supabase
-        .from("fixtures")
-        .update({
-          home_score: 0,
-          away_score: 0,
-          status: "completed",
-          completion_source: "admin_override",
-          completion_note:
-            "Completed as 0-0 by an authorised League Panel user.",
-          completed_at: now,
-          updated_at: now,
-        })
-        .eq("id", fixture.id);
-
-      if (fixtureError) {
-        throw new Error(
-          fixtureError.message,
-        );
-      }
-
-      const { error: resultError } =
-        await supabase
-          .from("results")
-          .upsert(
-            {
-              fixture_id: fixture.id,
-              home_score: 0,
-              away_score: 0,
-              notes:
-                "Authorised League Panel 0-0 override.",
-              submitted_by: userId,
-              completed_at: now,
-            },
-            {
-              onConflict: "fixture_id",
-            },
-          );
-
-      if (resultError) {
-        throw new Error(
-          resultError.message,
-        );
-      }
-
-      setSuccess(
-        "Fixture completed as an authorised 0-0.",
-      );
-
-      setSelectedFixtureId(null);
-
-      await loadPanel(false);
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Couldn't override the fixture.",
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function createDivision() {
-    if (!league || !canManageLeague) {
-      return;
-    }
-
-    const name =
-      newDivisionName.trim();
-
-    if (!name) {
-      setError(
-        "Enter a division name.",
-      );
-      return;
-    }
-
-    setSaving(true);
-    setError(null);
-    setSuccess(null);
-
-    try {
-      const { error: insertError } =
-        await supabase
-          .from("divisions")
-          .insert({
-            league_id: league.id,
-            name,
-            tier:
-              Number(newDivisionTier) || 1,
-            season: league.season,
-            status: "draft",
-            gameweek_interval_days: 3,
-          });
-
-      if (insertError) {
-        throw new Error(
-          insertError.message,
-        );
-      }
-
-      setNewDivisionName("");
-      setNewDivisionTier("1");
-
-      setSuccess(
-        "Division created.",
-      );
-
-      await loadPanel(false);
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Couldn't create the division.",
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function updateDivisionTier(
-    divisionId: string,
-    pointsTier: Division["points_tier"],
-  ) {
-    if (!isOwner) {
-      return;
-    }
-
-    setSaving(true);
-    setError(null);
-    setSuccess(null);
-
-    try {
-      const { error: updateError } =
-        await supabase
-          .from("divisions")
-          .update({
-            points_tier: pointsTier,
-          })
-          .eq("id", divisionId);
-
-      if (updateError) {
-        throw new Error(
-          updateError.message,
-        );
-      }
-
-      setSuccess(
-        "Scoring tier updated.",
-      );
-
-      await loadPanel(false);
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Couldn't update the scoring tier.",
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function changeDivisionStatus(
-    divisionId: string,
-    status: string,
-  ) {
-    if (!canManageLeague) {
-      return;
-    }
-
-    setSaving(true);
-    setError(null);
-    setSuccess(null);
-
-    try {
-      const update: Record<
-        string,
-        string | null
-      > = {
-        status,
-      };
-
-      if (status === "active") {
-        update.start_date =
-          new Date().toISOString();
-        update.ended_at = null;
-      }
-
-      if (status === "ended") {
-        update.ended_at =
-          new Date().toISOString();
-      }
-
-      const { error: updateError } =
-        await supabase
-          .from("divisions")
-          .update(update)
-          .eq("id", divisionId);
-
-      if (updateError) {
-        throw new Error(
-          updateError.message,
-        );
-      }
-
-      setSuccess(
-        status === "active"
-          ? "Division started."
-          : status === "ended"
-            ? "Division ended."
-            : "Division returned to draft.",
-      );
-
-      await loadPanel(false);
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Couldn't update the division.",
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function applyDeduction() {
-    if (!userId || !canManageLeague) {
-      return;
-    }
-
-    if (
-      !deductionDivisionId ||
-      !deductionTeamId
-    ) {
-      setError(
-        "Select a division and team.",
-      );
-      return;
-    }
-
-    const amount =
-      Number(deductionAmount);
-
-    if (
-      !Number.isInteger(amount) ||
-      amount === 0
-    ) {
-      setError(
-        "Enter a whole-number points adjustment.",
-      );
-      return;
-    }
-
-    const reason =
-      deductionReason.trim();
-
-    if (!reason) {
-      setError(
-        "Enter a reason for the adjustment.",
-      );
-      return;
-    }
-
-    setSaving(true);
-    setError(null);
-    setSuccess(null);
-
-    try {
-      const { error: rpcError } =
-        await supabase.rpc(
-          "apply_standings_point_adjustment",
-          {
-            p_division_id:
-              deductionDivisionId,
-            p_team_id:
-              deductionTeamId,
-            p_points_delta:
-              amount,
-            p_reason: reason,
-          },
-        );
-
-      if (rpcError) {
-        throw new Error(
-          rpcError.message,
-        );
-      }
-
-      setDeductionAmount("");
-      setDeductionReason("");
-
-      setSuccess(
-        amount < 0
-          ? `${Math.abs(amount)} points deducted.`
-          : `${amount} points restored.`,
-      );
-
-      await loadPanel(false);
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Couldn't apply the points adjustment.",
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function addCoOverseer() {
-    if (
-      !league ||
-      !canManageLeague
-    ) {
-      return;
-    }
-
-    const query =
-      newOverseerUsername.trim();
-
+  async function searchTeams(value: string) {
+    setTeamSearch(value);
+    const query = value.trim();
     if (!query) {
+      setTeamResults([]);
+      return;
+    }
+    setSearchingTeams(true);
+    const { data, error: searchError } = await supabase
+      .from("teams")
+      .select(
+        "id,name,short_name,logo_url,league_id,division_id,manager_id",
+      )
+      .or(`name.ilike.%${query}%,short_name.ilike.%${query}%`)
+      .order("name", { ascending: true })
+      .limit(20);
+    if (searchError) {
+      console.error(searchError);
+      setTeamResults([]);
+      setSearchingTeams(false);
+      return;
+    }
+    setTeamResults((data ?? []) as Team[]);
+    setSearchingTeams(false);
+  }
+  async function confirmTeam() {
+    if (!selectedTeam || !selectedDivisionId || !league) return;
+    setSavingTeam(true);
+    setError(null);
+    setSuccess(null);
+    const { data, error: updateError } = await supabase
+      .from("teams")
+      .update({
+        league_id: league.id,
+        division_id: selectedDivisionId,
+      })
+      .eq("id", selectedTeam.id)
+      .select(
+        "id,name,short_name,logo_url,league_id,division_id,manager_id",
+      )
+      .single();
+    if (updateError) {
+      setError(updateError.message);
+      setSavingTeam(false);
+      return;
+    }
+    const updatedTeam = data as Team;
+    setConfirmedTeams((current) => {
+      const existing = current.findIndex(
+        (team) => team.id === updatedTeam.id,
+      );
+      if (existing === -1) {
+        return [...current, updatedTeam].sort((a, b) =>
+          a.name.localeCompare(b.name),
+        );
+      }
+      const copy = [...current];
+      copy[existing] = updatedTeam;
+      return copy;
+    });
+    setSelectedTeam(null);
+    setSelectedDivisionId("");
+    setTeamSearch("");
+    setTeamResults([]);
+    setSavingTeam(false);
+    setSuccess(`${updatedTeam.name} has been confirmed in the league.`);
+  }
+  async function removeTeam(team: Team) {
+    if (!league) return;
+    const confirmed = window.confirm(
+      `Remove ${team.name} from ${league.name}?`,
+    );
+    if (!confirmed) return;
+    setError(null);
+    setSuccess(null);
+    const { error: updateError } = await supabase
+      .from("teams")
+      .update({
+        league_id: null,
+        division_id: null,
+      })
+      .eq("id", team.id)
+      .eq("league_id", league.id);
+    if (updateError) {
+      setError(updateError.message);
+      return;
+    }
+    setConfirmedTeams((current) =>
+      current.filter((item) => item.id !== team.id),
+    );
+    setSuccess(`${team.name} has been removed from the league.`);
+  }
+  async function createDivision() {
+    if (!league || !newDivisionName.trim()) return;
+    setCreatingDivision(true);
+    setError(null);
+    setSuccess(null);
+    const usedTiers = new Set(
+      divisions
+        .map((division) => division.tier ?? 1)
+        .filter((tier) => tier >= 1 && tier <= 3),
+    );
+    const nextAvailableTier = TIER_OPTIONS.find(
+      (option) => !usedTiers.has(option.value),
+    );
+    if (!nextAvailableTier) {
       setError(
-        "Enter a NOVA username or Discord ID.",
+        "All three division tiers already exist. NOVA only supports Elite, Tier 2 and Tier 3.",
+      );
+      setCreatingDivision(false);
+      return;
+    }
+    const { data, error: createError } = await supabase
+      .from("divisions")
+      .insert({
+        league_id: league.id,
+        name: newDivisionName.trim(),
+        tier: nextAvailableTier.value,
+        season: league.season,
+        status: "draft",
+        gameweek_interval_days:
+          settings.gameweek_interval_days || 3,
+      })
+      .select(
+        "id,league_id,name,tier,season,status,gameweek_interval_days",
+      )
+      .single();
+    if (createError) {
+      setError(createError.message);
+      setCreatingDivision(false);
+      return;
+    }
+    setDivisions((current) =>
+      [...current, data as Division].sort(
+        (a, b) =>
+          (a.tier ?? 1) - (b.tier ?? 1) ||
+          a.name.localeCompare(b.name),
+      ),
+    );
+    setNewDivisionName("");
+    setCreatingDivision(false);
+    setSuccess(
+      `${data.name} has been created as ${getTierLabel(data.tier)}.`,
+    );
+  }
+  async function updateDivisionTier(
+    division: Division,
+    tier: number,
+  ) {
+    if (!league || !canManageTiers) return;
+    if (![1, 2, 3].includes(tier)) {
+      setError("Invalid division tier.");
+      return;
+    }
+    const conflictingDivision = divisions.find(
+      (item) =>
+        item.id !== division.id &&
+        (item.tier ?? 1) === tier,
+    );
+    if (conflictingDivision) {
+      setError(
+        `${getTierLabel(tier)} is already assigned to ${conflictingDivision.name}.`,
       );
       return;
     }
-
     setSaving(true);
     setError(null);
     setSuccess(null);
-
-    try {
-      const { data: profile } =
-        await supabase
-          .from("profiles")
-          .select(
-            "id,username,display_name,discord_id",
-          )
-          .or(
-            `username.eq.${query},discord_id.eq.${query}`,
-          )
-          .maybeSingle();
-
-      if (!profile) {
-        throw new Error(
-          "That NOVA profile could not be found.",
-        );
-      }
-
-      const { error: insertError } =
-        await supabase
-          .from("league_members")
-          .upsert(
-            {
-              league_id: league.id,
-              user_id: profile.id,
-              role: "co_overseer",
-            },
-            {
-              onConflict:
-                "league_id,user_id",
-            },
-          );
-
-      if (insertError) {
-        throw new Error(
-          insertError.message,
-        );
-      }
-
-      setNewOverseerUsername("");
-
-      setSuccess(
-        "Co-Overseer added.",
-      );
-
-      await loadPanel(false);
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Couldn't add the Co-Overseer.",
-      );
-    } finally {
+    const { data, error: updateError } = await supabase
+      .from("divisions")
+      .update({ tier })
+      .eq("id", division.id)
+      .eq("league_id", league.id)
+      .select(
+        "id,league_id,name,tier,season,status,gameweek_interval_days",
+      )
+      .single();
+    if (updateError) {
+      setError(updateError.message);
       setSaving(false);
-    }
-  }
-
-  async function removeMember(
-    memberId: string,
-  ) {
-    if (!canManageLeague) {
       return;
     }
-
+    setDivisions((current) =>
+      current
+        .map((item) =>
+          item.id === division.id ? (data as Division) : item,
+        )
+        .sort(
+          (a, b) =>
+            (a.tier ?? 1) - (b.tier ?? 1) ||
+            a.name.localeCompare(b.name),
+        ),
+    );
+    setSaving(false);
+    setSuccess(
+      `${division.name} is now ${getTierLabel(tier)}.`,
+    );
+  }
+  async function deleteDivision(division: Division) {
+    if (!league) return;
+    const divisionTeams = confirmedTeams.filter(
+      (team) => team.division_id === division.id,
+    );
+    if (divisionTeams.length > 0) {
+      setError(
+        `You cannot delete ${division.name} while it still has teams in it.`,
+      );
+      return;
+    }
+    const confirmed = window.confirm(
+      `Delete the ${division.name} division?`,
+    );
+    if (!confirmed) return;
+    setError(null);
+    setSuccess(null);
+    const { error: deleteError } = await supabase
+      .from("divisions")
+      .delete()
+      .eq("id", division.id)
+      .eq("league_id", league.id);
+    if (deleteError) {
+      setError(deleteError.message);
+      return;
+    }
+    setDivisions((current) =>
+      current.filter((item) => item.id !== division.id),
+    );
+    setSuccess(`${division.name} has been deleted.`);
+  }
+  async function saveLeagueSettings() {
+    if (!league) return;
     setSaving(true);
     setError(null);
     setSuccess(null);
-
-    try {
-      const { error: deleteError } =
-        await supabase
-          .from("league_members")
-          .delete()
-          .eq("id", memberId);
-
-      if (deleteError) {
-        throw new Error(
-          deleteError.message,
-        );
-      }
-
-      setSuccess(
-        "League staff member removed.",
-      );
-
-      await loadPanel(false);
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Couldn't remove the staff member.",
-      );
-    } finally {
+    const payload = {
+      league_id: league.id,
+      max_roster_size: Number(settings.max_roster_size) || 1,
+      default_transfer_budget:
+        Number(settings.default_transfer_budget) || 0,
+      transfer_window_start:
+        settings.transfer_window_start || null,
+      transfer_window_end:
+        settings.transfer_window_end || null,
+      gameweek_interval_days:
+        Number(settings.gameweek_interval_days) || 3,
+    };
+    const { error: saveError } = await supabase
+      .from("league_settings")
+      .upsert(payload, { onConflict: "league_id" });
+    if (saveError) {
+      setError(saveError.message);
       setSaving(false);
+      return;
     }
+    setSettings((current) => ({
+      ...current,
+      ...payload,
+    }));
+    setSaving(false);
+    setSuccess("League settings saved.");
   }
-
-  function teamName(
-    teamId: string | null,
-  ) {
-    if (!teamId) {
-      return "Unknown team";
+  async function saveChannels() {
+    if (!league) return;
+    setSaving(true);
+    setError(null);
+    setSuccess(null);
+    const { error: saveError } = await supabase
+      .from("league_channel_settings")
+      .upsert(
+        {
+          ...channels,
+          league_id: league.id,
+        },
+        { onConflict: "league_id" },
+      );
+    if (saveError) {
+      setError(saveError.message);
+      setSaving(false);
+      return;
     }
-
+    setSaving(false);
+    setSuccess("Discord channel settings saved.");
+  }
+  async function searchMembers(value: string) {
+    setNewCoOverseer(value);
+    if (!value.trim()) {
+      setMemberSearchResults([]);
+      return;
+    }
+    setSearchingMembers(true);
+    const { data, error: searchError } = await supabase
+      .from("profiles")
+      .select("id,display_name,username,discord_id")
+      .or(
+        `username.ilike.%${value.trim()}%,display_name.ilike.%${value.trim()}%`,
+      )
+      .limit(10);
+    if (searchError) {
+      console.error(searchError);
+      setMemberSearchResults([]);
+      setSearchingMembers(false);
+      return;
+    }
+    setMemberSearchResults((data ?? []) as Profile[]);
+    setSearchingMembers(false);
+  }
+  async function addCoOverseer(profile: Profile) {
+    if (!league) return;
+    setSaving(true);
+    setError(null);
+    setSuccess(null);
+    const alreadyMember = members.some(
+      (member) => member.user_id === profile.id,
+    );
+    if (alreadyMember) {
+      setError("That user is already a member of this league.");
+      setSaving(false);
+      return;
+    }
+    const { data, error: insertError } = await supabase
+      .from("league_members")
+      .insert({
+        league_id: league.id,
+        user_id: profile.id,
+        role: "co_overseer",
+      })
+      .select("id,league_id,user_id,role")
+      .single();
+    if (insertError) {
+      setError(insertError.message);
+      setSaving(false);
+      return;
+    }
+    setMembers((current) => [...current, data as LeagueMember]);
+    setNewCoOverseer("");
+    setMemberSearchResults([]);
+    setSaving(false);
+    setSuccess(
+      `${profile.display_name || profile.username || "User"} is now a Co-Overseer.`,
+    );
+  }
+  async function removeCoOverseer(member: LeagueMember) {
+    if (!league || member.role !== "co_overseer" || !member.id) return;
+    const profile = member.user_id
+      ? profiles[member.user_id]
+      : null;
+    const confirmed = window.confirm(
+      `Remove ${profile?.display_name || profile?.username || "this Co-Overseer"}?`,
+    );
+    if (!confirmed) return;
+    setSaving(true);
+    setError(null);
+    setSuccess(null);
+    const { error: deleteError } = await supabase
+      .from("league_members")
+      .delete()
+      .eq("id", member.id)
+      .eq("league_id", league.id)
+      .eq("role", "co_overseer");
+    if (deleteError) {
+      setError(deleteError.message);
+      setSaving(false);
+      return;
+    }
+    setMembers((current) =>
+      current.filter((item) => item.id !== member.id),
+    );
+    setSaving(false);
+    setSuccess("Co-Overseer removed.");
+  }
+  const teamsByDivision = useMemo(() => {
+    const grouped: Record<string, Team[]> = {};
+    for (const division of divisions) {
+      grouped[division.id] = [];
+    }
+    for (const team of confirmedTeams) {
+      if (team.division_id && grouped[team.division_id]) {
+        grouped[team.division_id].push(team);
+      }
+    }
+    return grouped;
+  }, [divisions, confirmedTeams]);
+  const selectableDiscordChannels = useMemo(() => {
+    return discordChannels
+      .filter((channel) =>
+        [0, 5, 15, 16].includes(channel.type),
+      )
+      .sort((a, b) => {
+        const parentCompare = String(a.parent_id ?? "").localeCompare(
+          String(b.parent_id ?? ""),
+        );
+        if (parentCompare !== 0) {
+          return parentCompare;
+        }
+        return (a.position ?? 0) - (b.position ?? 0);
+      });
+  }, [discordChannels]);
+  const selectableDiscordRoles = useMemo(() => {
+    return discordRoles
+      .filter((role) => !role.managed)
+      .sort((a, b) => (b.position ?? 0) - (a.position ?? 0));
+  }, [discordRoles]);
+  function getManagerName(team: Team) {
+    if (!team.manager_id) return "No manager";
+    const profile = profiles[team.manager_id];
+    if (!profile) return "Manager";
+    return profile.display_name || profile.username || "Manager";
+  }
+  function discordChannelLabel(channel: DiscordChannelOption) {
+    return `#${channel.name}`;
+  }
+  function channelSelect(
+    label: string,
+    key: keyof Omit<ChannelSettings, "league_id">,
+  ) {
     return (
-      teamMap[teamId]?.name ??
-      "Unknown team"
+      <div>
+        <label className="text-sm font-semibold">{label}</label>
+        <select
+          value={channels[key] ?? ""}
+          onChange={(event) =>
+            setChannels((current) => ({
+              ...current,
+              [key]: event.target.value || null,
+            }))
+          }
+          className="mt-2 w-full rounded-xl border bg-background px-3 py-3 text-sm outline-none transition focus:ring-2 focus:ring-primary/20"
+        >
+          <option value="">Not configured</option>
+          {selectableDiscordChannels.map((channel) => (
+            <option key={channel.id} value={channel.id}>
+              {discordChannelLabel(channel)}
+            </option>
+          ))}
+        </select>
+      </div>
     );
   }
-
-  function divisionName(
-    divisionId: string | null,
+  function roleSelect(
+    label: string,
+    value: string,
+    onChange: (value: string) => void,
+    description: string,
   ) {
-    if (!divisionId) {
-      return "Unknown division";
-    }
-
     return (
-      divisionMap[divisionId]?.name ??
-      "Unknown division"
+      <div>
+        <label className="text-sm font-semibold">{label}</label>
+        <select
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          className="mt-2 w-full rounded-xl border bg-background px-3 py-3 text-sm outline-none transition focus:ring-2 focus:ring-primary/20"
+        >
+          <option value="">Not configured</option>
+          {selectableDiscordRoles.map((role) => (
+            <option key={role.id} value={role.id}>
+              {role.name}
+            </option>
+          ))}
+        </select>
+        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+          {description}
+        </p>
+      </div>
     );
   }
-
-  function formatDate(
-    value: string | null,
+  function sectionButton(
+    id: Section,
+    label: string,
+    icon: React.ReactNode,
   ) {
-    if (!value) {
-      return "Not set";
-    }
-
-    return new Intl.DateTimeFormat(
-      "en-GB",
-      {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      },
-    ).format(new Date(value));
-  }
-
-  function toDateTimeLocal(
-    value: string | null,
-  ) {
-    if (!value) {
-      return "";
-    }
-
-    const date = new Date(value);
-
-    const pad = (number: number) =>
-      String(number).padStart(2, "0");
-
-    return `${date.getFullYear()}-${pad(
-      date.getMonth() + 1,
-    )}-${pad(
-      date.getDate(),
-    )}T${pad(
-      date.getHours(),
-    )}:${pad(
-      date.getMinutes(),
-    )}`;
-  }
-
-  function getResult(
-    fixtureId: string,
-  ) {
-    return results.find(
-      (result) =>
-        result.fixture_id === fixtureId,
+    return (
+      <button
+        onClick={() => setActiveSection(id)}
+        className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm font-semibold transition ${
+          activeSection === id
+            ? "bg-primary text-primary-foreground"
+            : "hover:bg-accent"
+        }`}
+      >
+        {icon}
+        {label}
+      </button>
     );
   }
-
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-black text-white">
-        <Loader2 className="size-7 animate-spin text-white/60" />
-      </div>
-    );
-  }
-
-  if (error && !league) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-black px-6 text-white">
-        <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-white/[0.03] p-7">
-          <CircleAlert className="size-7 text-red-400" />
-
-          <h1 className="mt-5 text-2xl font-bold">
-            League Panel unavailable
-          </h1>
-
-          <p className="mt-2 text-sm text-white/50">
-            {error}
+      <main className="flex min-h-screen items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="size-7 animate-spin text-primary" />
+          <p className="text-sm text-muted-foreground">
+            Loading League Panel...
           </p>
         </div>
-      </div>
+      </main>
     );
   }
-
-  if (!league) {
-    return null;
+  if (accessDenied) {
+    return (
+      <main className="min-h-screen bg-background px-5 py-10">
+        <div className="mx-auto max-w-xl text-center">
+          <div className="mx-auto grid size-14 place-items-center rounded-2xl border bg-card">
+            <Shield className="size-6 text-muted-foreground" />
+          </div>
+          <h1 className="mt-6 text-3xl font-bold tracking-tight">
+            League access required
+          </h1>
+          <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-muted-foreground">
+            Your account is not currently assigned as an Overseer or
+            Co-Overseer of a league.
+          </p>
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-center">
+            <button
+              onClick={() => void loadPanel()}
+              className="rounded-lg border bg-card px-4 py-2.5 text-sm font-semibold"
+            >
+              Try again
+            </button>
+            <Link
+              to="/"
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground"
+            >
+              Return home
+              <ArrowRight className="size-4" />
+            </Link>
+          </div>
+        </div>
+      </main>
+    );
   }
-
+  if (error && !league) {
+    return (
+      <main className="min-h-screen bg-background px-5 py-10">
+        <div className="mx-auto max-w-xl">
+          <div className="rounded-2xl border bg-card p-6 md:p-8">
+            <CircleAlert className="size-7 text-destructive" />
+            <h1 className="mt-5 text-2xl font-bold">
+              League Panel couldn't load
+            </h1>
+            <p className="mt-3 text-sm leading-6 text-muted-foreground">
+              {error}
+            </p>
+            <button
+              onClick={() => void loadPanel()}
+              className="mt-6 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground"
+            >
+              Try again
+            </button>
+          </div>
+        </div>
+      </main>
+    );
+  }
+  if (!league) return null;
   return (
-    <div className="min-h-screen bg-black text-white">
-      <div className="mx-auto flex max-w-[1500px] gap-6 px-4 py-6 md:px-8">
-        <aside className="hidden w-60 shrink-0 md:block">
-          <div className="sticky top-6">
-            <div className="mb-7">
-              <div className="text-xs font-semibold tracking-[0.2em] text-white/35">
-                NOVA
-              </div>
-
-              <div className="mt-2 text-xl font-bold">
-                League Panel
-              </div>
-
-              <div className="mt-1 text-sm text-white/45">
-                {league.name}
-              </div>
-            </div>
-
-            <nav className="space-y-1">
-              {(
-                [
-                  ["overview", "Overview"],
-                  ["fixtures", "Fixtures"],
-                  ["results", "Results"],
-                  ["table", "Table"],
-                  ["teams", "Teams"],
-                  ["divisions", "Divisions"],
-                  [
-                    "deductions",
-                    "Point Deductions",
-                  ],
-                  ["overseers", "Overseers"],
-                ] as const
-              ).map(
-                ([section, label]) => (
-                  <NavButton
-                    key={section}
-                    active={
-                      activeSection ===
-                      section
-                    }
-                    onClick={() =>
-                      setActiveSection(
-                        section,
-                      )
-                    }
-                  >
-                    {label}
-                  </NavButton>
-                ),
+    <main className="min-h-screen bg-background">
+      <div className="mx-auto max-w-[1500px] px-4 py-6 md:px-8 md:py-10">
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+              NOVA / League Panel
+            </p>
+            <h1 className="mt-2 text-3xl font-bold tracking-tight md:text-4xl">
+              {league.name}
+            </h1>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <span className="rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide">
+                {memberRole === "overseer"
+                  ? "Overseer"
+                  : "Co-Overseer"}
+              </span>
+              {league.status && (
+                <span className="rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  {league.status}
+                </span>
               )}
-            </nav>
-
-            <div className="mt-7 border-t border-white/10 pt-5">
-              <div className="text-[11px] uppercase tracking-wider text-white/30">
-                Access
-              </div>
-
-              <div className="mt-2 flex items-center gap-2 text-sm text-white/60">
-                <Shield className="size-4" />
-
-                {isOwner
-                  ? "NOVA Owner"
-                  : isAdmin
-                    ? "NOVA Admin"
-                    : memberRole ===
-                        "co_overseer"
-                      ? "Co-Overseer"
-                      : "Overseer"}
-              </div>
+              {league.season && (
+                <span className="rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  {league.season}
+                </span>
+              )}
             </div>
           </div>
-        </aside>
-
-        <main className="min-w-0 flex-1">
-          <header className="mb-6 flex flex-col gap-4 border-b border-white/10 pb-6 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex items-center gap-3">
-              {league.logo_url ? (
-                <img
-                  src={league.logo_url}
-                  alt=""
-                  className="size-11 rounded-xl bg-white/5 object-contain"
-                />
-              ) : (
-                <div className="flex size-11 items-center justify-center rounded-xl bg-white/10">
-                  <Trophy className="size-5" />
-                </div>
-              )}
-
-              <div>
-                <h1 className="text-2xl font-bold">
-                  {league.name}
-                </h1>
-
-                <p className="text-sm text-white/40">
-                  {league.season ??
-                    "Current season"}{" "}
-                  ·{" "}
-                  {league.status ??
-                    "active"}
-                </p>
+          <Link
+            to="/leagues"
+            className="inline-flex items-center gap-2 self-start rounded-lg border bg-card px-4 py-2.5 text-sm font-medium transition hover:bg-accent lg:self-auto"
+          >
+            View leagues
+            <ArrowRight className="size-4" />
+          </Link>
+        </div>
+        {(error || success) && (
+          <div className="mt-6">
+            {error && (
+              <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                {error}
               </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <select
-                value={
-                  selectedDivisionId
-                }
-                onChange={(event) =>
-                  setSelectedDivisionId(
-                    event.target.value,
-                  )
-                }
-                className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm outline-none"
-              >
-                <option
-                  value="all"
-                  className="bg-black"
-                >
-                  All divisions
-                </option>
-
-                {divisions.map(
-                  (division) => (
-                    <option
-                      key={division.id}
-                      value={division.id}
-                      className="bg-black"
+            )}
+            {success && (
+              <div className="flex items-center gap-2 rounded-xl border border-primary/30 bg-primary/10 px-4 py-3 text-sm">
+                <Check className="size-4" />
+                {success}
+              </div>
+            )}
+          </div>
+        )}
+        <div className="mt-8 grid gap-6 lg:grid-cols-[230px_1fr]">
+          <aside className="h-fit rounded-2xl border bg-card p-2">
+            {sectionButton(
+              "overview",
+              "Overview",
+              <Shield className="size-4" />,
+            )}
+            {sectionButton(
+              "teams",
+              "Teams",
+              <Users className="size-4" />,
+            )}
+            {sectionButton(
+              "divisions",
+              "Divisions",
+              <CalendarDays className="size-4" />,
+            )}
+            {sectionButton(
+              "settings",
+              "League Settings",
+              <Settings className="size-4" />,
+            )}
+            {sectionButton(
+              "transfers",
+              "Transfers & Budget",
+              <Wallet className="size-4" />,
+            )}
+            {sectionButton(
+              "discord",
+              "Discord",
+              <Radio className="size-4" />,
+            )}
+            {sectionButton(
+              "overseers",
+              "Overseers",
+              <Shield className="size-4" />,
+            )}
+          </aside>
+          <section className="min-w-0">
+            {activeSection === "overview" && (
+              <div className="space-y-6">
+                <div className="grid gap-4 md:grid-cols-4">
+                  <StatCard
+                    label="Teams"
+                    value={confirmedTeams.length}
+                    icon={<Users className="size-5" />}
+                  />
+                  <StatCard
+                    label="Divisions"
+                    value={divisions.length}
+                    icon={<CalendarDays className="size-5" />}
+                  />
+                  <StatCard
+                    label="Max Roster"
+                    value={settings.max_roster_size ?? 20}
+                    icon={<Users className="size-5" />}
+                  />
+                  <StatCard
+                    label="Gameweek Interval"
+                    value={`${settings.gameweek_interval_days ?? 3}d`}
+                    icon={<CalendarDays className="size-5" />}
+                  />
+                </div>
+                <div className="rounded-2xl border bg-card p-6">
+                  <h2 className="text-xl font-bold">
+                    League control centre
+                  </h2>
+                  <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+                    Manage your league's divisions, participating teams,
+                    transfer rules, budgets, Discord configuration and
+                    Co-Overseers from one place.
+                  </p>
+                  <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    <QuickAction
+                      title="Manage teams"
+                      description="Confirm teams and assign divisions."
+                      onClick={() => setActiveSection("teams")}
+                    />
+                    <QuickAction
+                      title="Manage divisions"
+                      description="Create and organise divisions."
+                      onClick={() => setActiveSection("divisions")}
+                    />
+                    <QuickAction
+                      title="League settings"
+                      description="Roster size and gameweek rules."
+                      onClick={() => setActiveSection("settings")}
+                    />
+                    <QuickAction
+                      title="Transfer settings"
+                      description="Budgets and transfer windows."
+                      onClick={() => setActiveSection("transfers")}
+                    />
+                    <QuickAction
+                      title="Discord settings"
+                      description="Configure channels and staff roles."
+                      onClick={() => setActiveSection("discord")}
+                    />
+                    <QuickAction
+                      title="Co-Overseers"
+                      description="Manage your league staff."
+                      onClick={() => setActiveSection("overseers")}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+            {activeSection === "teams" && (
+              <div className="space-y-6">
+                <div className="rounded-2xl border bg-card p-6">
+                  <h2 className="text-xl font-bold">
+                    Confirm a NOVA team
+                  </h2>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Search for any team registered on NOVA, select it,
+                    choose its division, then confirm it into this league.
+                  </p>
+                  <div className="mt-5 grid gap-4 lg:grid-cols-[1fr_240px_auto]">
+                    <div className="relative">
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                        <input
+                          value={teamSearch}
+                          onChange={(event) =>
+                            void searchTeams(event.target.value)
+                          }
+                          placeholder="Search registered teams..."
+                          className="w-full rounded-xl border bg-background py-3 pl-10 pr-3 text-sm outline-none focus:ring-2 focus:ring-primary/20"
+                        />
+                        {searchingTeams && (
+                          <Loader2 className="absolute right-3 top-1/2 size-4 -translate-y-1/2 animate-spin text-muted-foreground" />
+                        )}
+                      </div>
+                      {teamResults.length > 0 && !selectedTeam && (
+                        <div className="absolute z-20 mt-2 max-h-64 w-full overflow-auto rounded-xl border bg-card p-1 shadow-xl">
+                          {teamResults.map((team) => (
+                            <button
+                              key={team.id}
+                              onClick={() => {
+                                setSelectedTeam(team);
+                                setTeamResults([]);
+                                setTeamSearch(team.name);
+                              }}
+                              className="flex w-full items-center gap-3 rounded-lg p-3 text-left transition hover:bg-accent"
+                            >
+                              {team.logo_url ? (
+                                <img
+                                  src={team.logo_url}
+                                  alt=""
+                                  className="size-9 rounded-full object-contain"
+                                />
+                              ) : (
+                                <div className="grid size-9 place-items-center rounded-full border">
+                                  <Users className="size-4" />
+                                </div>
+                              )}
+                              <div>
+                                <p className="text-sm font-semibold">
+                                  {team.name}
+                                </p>
+                                {team.short_name && (
+                                  <p className="text-xs text-muted-foreground">
+                                    {team.short_name}
+                                  </p>
+                                )}
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <select
+                      value={selectedDivisionId}
+                      onChange={(event) =>
+                        setSelectedDivisionId(event.target.value)
+                      }
+                      className="rounded-xl border bg-background px-3 py-3 text-sm outline-none"
                     >
-                      {division.name}
-                    </option>
-                  ),
-                )}
-              </select>
-
-              <button
-                onClick={() =>
-                  void loadPanel(false)
-                }
-                disabled={refreshing}
-                className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm hover:bg-white/[0.08] disabled:opacity-50"
-              >
-                <RefreshCw
-                  className={
-                    refreshing
-                      ? "size-4 animate-spin"
-                      : "size-4"
-                  }
-                />
-                Refresh
-              </button>
-            </div>
-          </header>
-
-          {error && (
-            <div className="mb-5 flex items-start gap-3 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-              <CircleAlert className="mt-0.5 size-4 shrink-0" />
-
-              <span>{error}</span>
-
-              <button
-                className="ml-auto text-red-200/60 hover:text-red-200"
-                onClick={() =>
-                  setError(null)
-                }
-              >
-                <X className="size-4" />
-              </button>
-            </div>
-          )}
-
-          {success && (
-            <div className="mb-5 flex items-center gap-3 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
-              <Check className="size-4" />
-              {success}
-            </div>
-          )}
-
-          {activeSection ===
-            "overview" && (
-            <Overview
-              league={league}
-              divisions={divisions}
-              teams={teams}
-              fixtures={fixtures}
-              standings={standings}
-              completedFixtures={
-                completedFixtures
-              }
-              scheduledFixtures={
-                scheduledFixtures
-              }
-              divisionMap={divisionMap}
-              teamMap={teamMap}
-            />
-          )}
-
-          {activeSection ===
-            "fixtures" && (
-            <FixturesSection
-              fixtures={
-                visibleFixtures
-              }
-              teamName={teamName}
-              divisionName={
-                divisionName
-              }
-              formatDate={formatDate}
-              selectedFixtureId={
-                selectedFixtureId
-              }
-              setSelectedFixtureId={
-                setSelectedFixtureId
-              }
-              getResult={getResult}
-              canManageLeague={
-                canManageLeague
-              }
-              saving={saving}
-              saveFixtureDeadline={
-                saveFixtureDeadline
-              }
-              overrideFixture={
-                overrideFixture
-              }
-              toDateTimeLocal={
-                toDateTimeLocal
-              }
-            />
-          )}
-
-          {activeSection ===
-            "results" && (
-            <ResultsSection
-              fixtures={
-                completedFixtures
-              }
-              results={results}
-              teamName={teamName}
-              divisionName={
-                divisionName
-              }
-              formatDate={formatDate}
-            />
-          )}
-
-          {activeSection ===
-            "table" && (
-            <TableSection
-              standings={
-                visibleStandings
-              }
-              teams={teams}
-              divisions={divisions}
-              adjustments={
-                visibleAdjustments
-              }
-            />
-          )}
-
-          {activeSection ===
-            "teams" && (
-            <TeamsSection
-              teams={teams}
-              divisions={divisions}
-              profiles={profileMap}
-              teamStaff={teamStaff}
-            />
-          )}
-
-          {activeSection ===
-            "divisions" && (
-            <DivisionsSection
-              divisions={divisions}
-              teams={teams}
-              isOwner={isOwner}
-              canManageLeague={
-                canManageLeague
-              }
-              newDivisionName={
-                newDivisionName
-              }
-              setNewDivisionName={
-                setNewDivisionName
-              }
-              newDivisionTier={
-                newDivisionTier
-              }
-              setNewDivisionTier={
-                setNewDivisionTier
-              }
-              createDivision={
-                createDivision
-              }
-              updateDivisionTier={
-                updateDivisionTier
-              }
-              changeDivisionStatus={
-                changeDivisionStatus
-              }
-              saving={saving}
-            />
-          )}
-
-          {activeSection ===
-            "deductions" && (
-            <DeductionsSection
-              divisions={divisions}
-              teams={teams}
-              adjustments={
-                adjustments
-              }
-              profiles={profiles}
-              deductionDivisionId={
-                deductionDivisionId
-              }
-              setDeductionDivisionId={
-                setDeductionDivisionId
-              }
-              deductionTeamId={
-                deductionTeamId
-              }
-              setDeductionTeamId={
-                setDeductionTeamId
-              }
-              deductionAmount={
-                deductionAmount
-              }
-              setDeductionAmount={
-                setDeductionAmount
-              }
-              deductionReason={
-                deductionReason
-              }
-              setDeductionReason={
-                setDeductionReason
-              }
-              applyDeduction={
-                applyDeduction
-              }
-              canManageLeague={
-                canManageLeague
-              }
-              saving={saving}
-            />
-          )}
-
-          {activeSection ===
-            "overseers" && (
-            <OverseersSection
-              members={members}
-              profiles={profiles}
-              newOverseerUsername={
-                newOverseerUsername
-              }
-              setNewOverseerUsername={
-                setNewOverseerUsername
-              }
-              addCoOverseer={
-                addCoOverseer
-              }
-              removeMember={
-                removeMember
-              }
-              canManageLeague={
-                canManageLeague
-              }
-              saving={saving}
-            />
-          )}
-        </main>
+                      <option value="">Select division</option>
+                      {divisions.map((division) => (
+                        <option key={division.id} value={division.id}>
+                          {division.name} •{" "}
+                          {getTierLabel(division.tier)}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      disabled={
+                        !selectedTeam ||
+                        !selectedDivisionId ||
+                        savingTeam
+                      }
+                      onClick={() => void confirmTeam()}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {savingTeam && (
+                        <Loader2 className="size-4 animate-spin" />
+                      )}
+                      Confirm Team
+                    </button>
+                  </div>
+                </div>
+                <div className="rounded-2xl border bg-card p-6">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <h2 className="text-xl font-bold">
+                        Confirmed teams
+                      </h2>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {confirmedTeams.length} team
+                        {confirmedTeams.length === 1 ? "" : "s"} in this
+                        league.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-5 space-y-6">
+                    {divisions.map((division) => (
+                      <div key={division.id}>
+                        <div className="mb-3 flex items-center justify-between">
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h3 className="font-bold">
+                                {division.name}
+                              </h3>
+                              <span className="rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase">
+                                {getTierLabel(division.tier)}
+                              </span>
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              {teamsByDivision[division.id]?.length ?? 0}{" "}
+                              teams
+                            </p>
+                          </div>
+                        </div>
+                        <div className="grid gap-2">
+                          {(teamsByDivision[division.id] ?? []).map(
+                            (team) => (
+                              <TeamRow
+                                key={team.id}
+                                team={team}
+                                manager={getManagerName(team)}
+                                onRemove={() => void removeTeam(team)}
+                              />
+                            ),
+                          )}
+                          {(
+                            teamsByDivision[division.id] ?? []
+                          ).length === 0 && (
+                            <div className="rounded-xl border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
+                              No teams confirmed in this division.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                    {confirmedTeams.filter(
+                      (team) => !team.division_id,
+                    ).length > 0 && (
+                      <div>
+                        <h3 className="mb-3 font-bold">
+                          Unassigned teams
+                        </h3>
+                        <div className="grid gap-2">
+                          {confirmedTeams
+                            .filter((team) => !team.division_id)
+                            .map((team) => (
+                              <TeamRow
+                                key={team.id}
+                                team={team}
+                                manager={getManagerName(team)}
+                                onRemove={() => void removeTeam(team)}
+                              />
+                            ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+            {activeSection === "divisions" && (
+              <div className="space-y-6">
+                <div className="rounded-2xl border bg-card p-6">
+                  <h2 className="text-xl font-bold">
+                    Create division
+                  </h2>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Create a new division for this league. NOVA supports
+                    three division levels: Elite, Tier 2 and Tier 3.
+                  </p>
+                  <div className="mt-5 grid gap-3 md:grid-cols-[1fr_auto]">
+                    <input
+                      value={newDivisionName}
+                      onChange={(event) =>
+                        setNewDivisionName(event.target.value)
+                      }
+                      placeholder="Division name"
+                      className="rounded-xl border bg-background px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/20"
+                    />
+                    <button
+                      disabled={
+                        !newDivisionName.trim() || creatingDivision
+                      }
+                      onClick={() => void createDivision()}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+                    >
+                      {creatingDivision ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <Plus className="size-4" />
+                      )}
+                      Create Division
+                    </button>
+                  </div>
+                  <div className="mt-4 rounded-xl border border-dashed bg-background p-4">
+                    <p className="text-xs leading-5 text-muted-foreground">
+                      {canManageTiers
+                        ? "As a NOVA Admin/Owner, you can assign or change a division's tier below."
+                        : "Division tiers are controlled by NOVA Admins and the NOVA Owner. League Overseers and Co-Overseers cannot select or change them."}
+                    </p>
+                  </div>
+                </div>
+                <div className="rounded-2xl border bg-card p-6">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <h2 className="text-xl font-bold">
+                        Divisions
+                      </h2>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {divisions.length} division
+                        {divisions.length === 1 ? "" : "s"} configured.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {TIER_OPTIONS.map((option) => (
+                        <span
+                          key={option.value}
+                          className="rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide"
+                        >
+                          {option.label}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="mt-5 grid gap-3">
+                    {divisions.map((division) => {
+                      const count =
+                        teamsByDivision[division.id]?.length ?? 0;
+                      return (
+                        <div
+                          key={division.id}
+                          className="flex flex-col gap-4 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between"
+                        >
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h3 className="font-bold">
+                                {division.name}
+                              </h3>
+                              {!canManageTiers && (
+                                <span className="rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase">
+                                  {getTierLabel(division.tier)}
+                                </span>
+                              )}
+                            </div>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {count} team
+                              {count === 1 ? "" : "s"} •{" "}
+                              {division.status ?? "draft"}
+                            </p>
+                          </div>
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                            {canManageTiers && (
+                              <select
+                                value={division.tier ?? 1}
+                                onChange={(event) =>
+                                  void updateDivisionTier(
+                                    division,
+                                    Number(event.target.value),
+                                  )
+                                }
+                                disabled={saving}
+                                className="rounded-lg border bg-background px-3 py-2 text-sm font-semibold outline-none focus:ring-2 focus:ring-primary/20"
+                              >
+                                {TIER_OPTIONS.map((option) => (
+                                  <option
+                                    key={option.value}
+                                    value={option.value}
+                                  >
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                            <button
+                              onClick={() =>
+                                void deleteDivision(division)
+                              }
+                              className="inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold text-destructive transition hover:bg-destructive/10"
+                            >
+                              <Trash2 className="size-4" />
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {divisions.length === 0 && (
+                      <div className="rounded-xl border border-dashed px-5 py-10 text-center text-sm text-muted-foreground">
+                        No divisions have been created yet.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+            {activeSection === "settings" && (
+              <div className="space-y-6">
+                <SettingsCard
+                  title="League settings"
+                  description="Core rules used by this league."
+                >
+                  <div className="grid gap-5 md:grid-cols-2">
+                    <Field
+                      label="Maximum roster size"
+                      type="number"
+                      value={String(settings.max_roster_size ?? 20)}
+                      onChange={(value) =>
+                        setSettings((current) => ({
+                          ...current,
+                          max_roster_size: Number(value),
+                        }))
+                      }
+                    />
+                    <Field
+                      label="Gameweek interval (days)"
+                      type="number"
+                      value={String(
+                        settings.gameweek_interval_days ?? 3,
+                      )}
+                      onChange={(value) =>
+                        setSettings((current) => ({
+                          ...current,
+                          gameweek_interval_days: Number(value),
+                        }))
+                      }
+                    />
+                  </div>
+                  <SaveButton
+                    saving={saving}
+                    onClick={() => void saveLeagueSettings()}
+                  />
+                </SettingsCard>
+                <SettingsCard
+                  title="League information"
+                  description="Information displayed around NOVA."
+                >
+                  <div className="rounded-xl border bg-background p-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      League
+                    </p>
+                    <p className="mt-1 text-lg font-bold">
+                      {league.name}
+                    </p>
+                    {league.description && (
+                      <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                        {league.description}
+                      </p>
+                    )}
+                    {league.season && (
+                      <p className="mt-3 text-xs text-muted-foreground">
+                        Season: {league.season}
+                      </p>
+                    )}
+                  </div>
+                </SettingsCard>
+              </div>
+            )}
+            {activeSection === "transfers" && (
+              <div className="space-y-6">
+                <SettingsCard
+                  title="Transfer & budget rules"
+                  description="Control the starting budget, roster limit and transfer window for this league."
+                >
+                  <div className="grid gap-5 md:grid-cols-2">
+                    <Field
+                      label="Starting transfer budget"
+                      type="number"
+                      value={String(
+                        settings.default_transfer_budget ?? 0,
+                      )}
+                      onChange={(value) =>
+                        setSettings((current) => ({
+                          ...current,
+                          default_transfer_budget: Number(value),
+                        }))
+                      }
+                    />
+                    <Field
+                      label="Maximum roster size"
+                      type="number"
+                      value={String(settings.max_roster_size ?? 20)}
+                      onChange={(value) =>
+                        setSettings((current) => ({
+                          ...current,
+                          max_roster_size: Number(value),
+                        }))
+                      }
+                    />
+                    <Field
+                      label="Transfer window start"
+                      type="datetime-local"
+                      value={toDateTimeLocal(
+                        settings.transfer_window_start,
+                      )}
+                      onChange={(value) =>
+                        setSettings((current) => ({
+                          ...current,
+                          transfer_window_start: value
+                            ? new Date(value).toISOString()
+                            : null,
+                        }))
+                      }
+                    />
+                    <Field
+                      label="Transfer window end"
+                      type="datetime-local"
+                      value={toDateTimeLocal(
+                        settings.transfer_window_end,
+                      )}
+                      onChange={(value) =>
+                        setSettings((current) => ({
+                          ...current,
+                          transfer_window_end: value
+                            ? new Date(value).toISOString()
+                            : null,
+                        }))
+                      }
+                    />
+                  </div>
+                  <SaveButton
+                    saving={saving}
+                    onClick={() => void saveLeagueSettings()}
+                  />
+                </SettingsCard>
+                <div className="rounded-2xl border bg-card p-6">
+                  <div className="flex items-center gap-3">
+                    <div className="grid size-10 place-items-center rounded-xl border">
+                      <Wallet className="size-5" />
+                    </div>
+                    <div>
+                      <h2 className="font-bold">Transfer rules</h2>
+                      <p className="text-sm text-muted-foreground">
+                        The underlying transfer, loan and release rules
+                        can be enforced by NOVA's transfer system.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                    <RuleCard title="Loans" />
+                    <RuleCard title="Releases" />
+                    <RuleCard title="Transfer offers" />
+                  </div>
+                </div>
+              </div>
+            )}
+            {activeSection === "discord" && (
+              <div className="space-y-6">
+                <SettingsCard
+                  title="Discord staff roles"
+                  description="Choose the Discord roles that NOVA will recognise as Manager and Co-Manager roles for this league."
+                >
+                  {!guildSettings?.guild_id ? (
+                    <div className="rounded-xl border border-dashed bg-background p-5">
+                      <p className="font-semibold">
+                        No Discord server connected
+                      </p>
+                      <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                        Run <strong>/setup</strong> in the Discord server
+                        for this league first. Once the server is
+                        connected, you can select the Manager and
+                        Co-Manager roles here.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="rounded-xl border bg-background p-4">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          Connected Discord server
+                        </p>
+                        <p className="mt-1 font-semibold">
+                          {guildSettings.guild_name ||
+                            guildSettings.guild_id}
+                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Discord roles and channels are synced
+                          automatically from this server.
+                        </p>
+                      </div>
+                      {selectableDiscordRoles.length === 0 ? (
+                        <div className="mt-5 rounded-xl border border-dashed bg-background p-5">
+                          <p className="font-semibold">
+                            No Discord roles available yet
+                          </p>
+                          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                            NOVA has not received the server's Discord
+                            roles yet. Make sure the NOVA bot is in the
+                            server and deployed, then refresh this page.
+                          </p>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="mt-5 grid gap-5 md:grid-cols-2">
+                            {roleSelect(
+                              "Manager Role",
+                              managerRoleId,
+                              setManagerRoleId,
+                              "Members with this Discord role can use NOVA manager commands for their club.",
+                            )}
+                            {roleSelect(
+                              "Co-Manager Role",
+                              coManagerRoleId,
+                              setCoManagerRoleId,
+                              "Members with this Discord role receive the same manager-level NOVA command access.",
+                            )}
+                          </div>
+                          <div className="mt-5 rounded-xl border border-dashed bg-background p-4">
+                            <p className="text-sm font-semibold">
+                              Used by the NOVA transfer system
+                            </p>
+                            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                              These roles control access to commands such
+                              as /sign, /release, /transfer and /loan.
+                              The bot will also verify that the manager or
+                              co-manager belongs to the relevant club.
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => void saveDiscordRoles()}
+                            disabled={savingDiscordRoles}
+                            className="mt-5 inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+                          >
+                            {savingDiscordRoles ? (
+                              <Loader2 className="size-4 animate-spin" />
+                            ) : (
+                              <Check className="size-4" />
+                            )}
+                            Save Staff Roles
+                          </button>
+                        </>
+                      )}
+                    </>
+                  )}
+                </SettingsCard>
+                <SettingsCard
+                  title="Discord channels"
+                  description="Choose where NOVA sends fixtures, results, transfers, announcements and other league messages."
+                >
+                  {!guildSettings?.guild_id ? (
+                    <div className="rounded-xl border border-dashed bg-background p-5">
+                      <p className="font-semibold">
+                        No Discord server connected
+                      </p>
+                      <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                        Run <strong>/setup</strong> in the league's
+                        Discord server first.
+                      </p>
+                    </div>
+                  ) : selectableDiscordChannels.length === 0 ? (
+                    <div className="rounded-xl border border-dashed bg-background p-5">
+                      <p className="font-semibold">
+                        No Discord channels available yet
+                      </p>
+                      <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                        NOVA has not received the server's channels yet.
+                        Make sure the NOVA bot is in the server and
+                        deployed, then refresh this page.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="grid gap-5 md:grid-cols-2">
+                        {channelSelect(
+                          "Fixtures Channel",
+                          "fixtures_channel_id",
+                        )}
+                        {channelSelect(
+                          "Results Channel",
+                          "results_channel_id",
+                        )}
+                        {channelSelect(
+                          "Table Channel",
+                          "table_channel_id",
+                        )}
+                        {channelSelect(
+                          "Signings Channel",
+                          "signings_channel_id",
+                        )}
+                        {channelSelect(
+                          "Releases Channel",
+                          "releases_channel_id",
+                        )}
+                        {channelSelect(
+                          "Budgets Channel",
+                          "budgets_channel_id",
+                        )}
+                        {channelSelect(
+                          "Transfers Channel",
+                          "transfers_channel_id",
+                        )}
+                        {channelSelect(
+                          "Loans Channel",
+                          "loans_channel_id",
+                        )}
+                        {channelSelect(
+                          "Transfer Window Channel",
+                          "transfer_window_channel_id",
+                        )}
+                        {channelSelect(
+                          "Announcements Channel",
+                          "announcements_channel_id",
+                        )}
+                      </div>
+                      <div className="mt-5 rounded-xl border border-dashed bg-background p-4">
+                        <p className="text-sm font-semibold">
+                          Discord channel picker
+                        </p>
+                        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                          These dropdowns are populated automatically from
+                          the connected Discord server. NOVA only shows
+                          selectable channel types and stores the selected
+                          Discord channel IDs behind the scenes.
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => void saveChannels()}
+                        disabled={saving}
+                        className="mt-5 inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+                      >
+                        {saving && (
+                          <Loader2 className="size-4 animate-spin" />
+                        )}
+                        Save Discord Settings
+                      </button>
+                    </>
+                  )}
+                </SettingsCard>
+                <div className="rounded-2xl border bg-card p-6">
+                  <h2 className="text-lg font-bold">
+                    Global announcements
+                  </h2>
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                    The configured Announcements Channel receives
+                    NOVA-wide announcements. Only NOVA Admin can actually
+                    send global announcements.
+                  </p>
+                </div>
+              </div>
+            )}
+            {activeSection === "overseers" && (
+              <div className="space-y-6">
+                <SettingsCard
+                  title="League Overseers"
+                  description="Manage the people responsible for operating this league."
+                >
+                  <div className="space-y-3">
+                    {members.map((member) => {
+                      const profile = member.user_id
+                        ? profiles[member.user_id]
+                        : undefined;
+                      const name =
+                        profile?.display_name ||
+                        profile?.username ||
+                        "Unknown user";
+                      return (
+                        <div
+                          key={
+                            member.id ??
+                            `${member.user_id}-${member.role}`
+                          }
+                          className="flex items-center justify-between rounded-xl border p-4"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="grid size-10 place-items-center rounded-full border">
+                              <Shield className="size-4" />
+                            </div>
+                            <div>
+                              <p className="font-semibold">{name}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {member.role === "overseer"
+                                  ? "League Overseer"
+                                  : "Co-Overseer"}
+                              </p>
+                            </div>
+                          </div>
+                          {member.role === "co_overseer" && (
+                            <button
+                              onClick={() =>
+                                void removeCoOverseer(member)
+                              }
+                              className="rounded-lg border p-2 text-destructive transition hover:bg-destructive/10"
+                              title="Remove Co-Overseer"
+                            >
+                              <Trash2 className="size-4" />
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </SettingsCard>
+                <SettingsCard
+                  title="Appoint Co-Overseer"
+                  description="Search for a NOVA user and give them operational access to this league."
+                >
+                  <div className="relative">
+                    <input
+                      value={newCoOverseer}
+                      onChange={(event) =>
+                        void searchMembers(event.target.value)
+                      }
+                      placeholder="Search username or display name..."
+                      className="w-full rounded-xl border bg-background px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/20"
+                    />
+                    {searchingMembers && (
+                      <Loader2 className="absolute right-3 top-1/2 size-4 -translate-y-1/2 animate-spin" />
+                    )}
+                    {memberSearchResults.length > 0 && (
+                      <div className="absolute z-20 mt-2 max-h-64 w-full overflow-auto rounded-xl border bg-card p-1 shadow-xl">
+                        {memberSearchResults.map((profile) => (
+                          <button
+                            key={profile.id}
+                            onClick={() =>
+                              void addCoOverseer(profile)
+                            }
+                            className="flex w-full items-center gap-3 rounded-lg p-3 text-left transition hover:bg-accent"
+                          >
+                            <div className="grid size-9 place-items-center rounded-full border">
+                              <Users className="size-4" />
+                            </div>
+                            <div>
+                              <p className="text-sm font-semibold">
+                                {profile.display_name ||
+                                  profile.username ||
+                                  "User"}
+                              </p>
+                              {profile.username && (
+                                <p className="text-xs text-muted-foreground">
+                                  @{profile.username}
+                                </p>
+                              )}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </SettingsCard>
+                <div className="rounded-2xl border bg-card p-6">
+                  <h2 className="text-lg font-bold">
+                    Permission boundary
+                  </h2>
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                    League Overseers and Co-Overseers only manage this
+                    league. They do not receive NOVA-wide administrator
+                    permissions.
+                  </p>
+                  <div className="mt-5 rounded-xl border bg-background p-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Division tier authority
+                    </p>
+                    <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                      Only NOVA Admins and the NOVA Owner can assign or
+                      change division tiers. The available levels are
+                      Elite, Tier 2 and Tier 3.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </section>
+        </div>
       </div>
+    </main>
+  );
+}
+function StatCard({
+  label,
+  value,
+  icon,
+}: {
+  label: string;
+  value: string | number;
+  icon: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-2xl border bg-card p-5">
+      <div className="flex items-center justify-between">
+        <span className="text-sm text-muted-foreground">
+          {label}
+        </span>
+        {icon}
+      </div>
+      <p className="mt-4 text-3xl font-bold">{value}</p>
     </div>
   );
 }
-
-function NavButton({
-  active,
-  children,
+function QuickAction({
+  title,
+  description,
   onClick,
 }: {
-  active: boolean;
-  children: ReactNode;
+  title: string;
+  description: string;
   onClick: () => void;
 }) {
   return (
     <button
       onClick={onClick}
-      className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm transition ${
-        active
-          ? "bg-white text-black"
-          : "text-white/55 hover:bg-white/[0.05] hover:text-white"
-      }`}
+      className="rounded-xl border p-4 text-left transition hover:bg-accent"
     >
-      {children}
-
-      {active && (
-        <ChevronRight className="size-4" />
-      )}
+      <p className="font-semibold">{title}</p>
+      <p className="mt-1 text-xs leading-5 text-muted-foreground">
+        {description}
+      </p>
     </button>
   );
 }
-
-function Card({
-  children,
-  className = "",
+function TeamRow({
+  team,
+  manager,
+  onRemove,
 }: {
-  children: ReactNode;
-  className?: string;
+  team: Team;
+  manager: string;
+  onRemove: () => void;
 }) {
   return (
-    <div
-      className={`rounded-2xl border border-white/10 bg-white/[0.03] ${className}`}
-    >
-      {children}
+    <div className="flex flex-col gap-3 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex items-center gap-3">
+        {team.logo_url ? (
+          <img
+            src={team.logo_url}
+            alt=""
+            className="size-10 rounded-full object-contain"
+          />
+        ) : (
+          <div className="grid size-10 place-items-center rounded-full border">
+            <Users className="size-4" />
+          </div>
+        )}
+        <div>
+          <p className="font-semibold">{team.name}</p>
+          <p className="text-xs text-muted-foreground">
+            {manager}
+          </p>
+        </div>
+      </div>
+      <button
+        onClick={onRemove}
+        className="inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold text-destructive transition hover:bg-destructive/10"
+      >
+        <Trash2 className="size-4" />
+        Remove
+      </button>
     </div>
   );
 }
-
-function SectionHeading({
-  eyebrow,
+function SettingsCard({
   title,
   description,
+  children,
 }: {
-  eyebrow: string;
   title: string;
   description: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-2xl border bg-card p-6">
+      <h2 className="text-xl font-bold">{title}</h2>
+      <p className="mt-2 text-sm leading-6 text-muted-foreground">
+        {description}
+      </p>
+      <div className="mt-6">{children}</div>
+    </div>
+  );
+}
+function Field({
+  label,
+  type,
+  value,
+  onChange,
+}: {
+  label: string;
+  type: string;
+  value: string;
+  onChange: (value: string) => void;
 }) {
   return (
     <div>
-      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-white/30">
-        {eyebrow}
-      </div>
-
-      <h2 className="mt-2 text-2xl font-bold">
-        {title}
-      </h2>
-
-      <p className="mt-1 max-w-2xl text-sm text-white/45">
-        {description}
+      <label className="text-sm font-semibold">{label}</label>
+      <input
+        type={type}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-2 w-full rounded-xl border bg-background px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/20"
+      />
+    </div>
+  );
+}
+function SaveButton({
+  saving,
+  onClick,
+}: {
+  saving: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={saving}
+      className="mt-6 inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+    >
+      {saving ? (
+        <Loader2 className="size-4 animate-spin" />
+      ) : (
+        <Check className="size-4" />
+      )}
+      Save Settings
+    </button>
+  );
+}
+function RuleCard({ title }: { title: string }) {
+  return (
+    <div className="rounded-xl border p-4">
+      <p className="font-semibold">{title}</p>
+      <p className="mt-1 text-xs text-muted-foreground">
+        Managed by NOVA's league rules.
       </p>
     </div>
   );
 }
-
-function EmptyState({
-  text,
-}: {
-  text: string;
-}) {
-  return (
-    <Card className="p-8 text-center">
-      <div className="text-sm text-white/40">
-        {text}
-      </div>
-    </Card>
+function toDateTimeLocal(value: string | null) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const offset = date.getTimezoneOffset();
+  const localDate = new Date(
+    date.getTime() - offset * 60 * 1000,
   );
-}
-
-function StatCard({
-  label,
-  value,
-}: {
-  label: string;
-  value: string | number;
-}) {
-  return (
-    <Card className="p-5">
-      <div className="text-xs uppercase tracking-wider text-white/35">
-        {label}
-      </div>
-
-      <div className="mt-2 text-3xl font-bold">
-        {value}
-      </div>
-    </Card>
-  );
-}
-
-function StatusPill({
-  status,
-}: {
-  status: string;
-}) {
-  const completed =
-    status === "completed";
-
-  return (
-    <span
-      className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-medium ${
-        completed
-          ? "bg-emerald-500/10 text-emerald-300"
-          : "bg-white/10 text-white/55"
-      }`}
-    >
-      {status}
-    </span>
-  );
-}
-
-function InfoBox({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="rounded-xl bg-white/[0.03] p-4">
-      <div className="text-[10px] uppercase tracking-wider text-white/30">
-        {label}
-      </div>
-
-      <div className="mt-2 text-sm font-medium">
-        {value}
-      </div>
-    </div>
-  );
-}
-
-function Overview({
-  league,
-  divisions,
-  teams,
-  fixtures,
-  standings,
-  completedFixtures,
-  scheduledFixtures,
-  divisionMap,
-  teamMap,
-}: {
-  league: League;
-  divisions: Division[];
-  teams: Team[];
-  fixtures: Fixture[];
-  standings: Standing[];
-  completedFixtures: Fixture[];
-  scheduledFixtures: Fixture[];
-  divisionMap: Record<
-    string,
-    Division
-  >;
-  teamMap: Record<
-    string,
-    Team
-  >;
-}) {
-  const nextFixture =
-    scheduledFixtures[0];
-
-  return (
-    <div className="space-y-6">
-      <SectionHeading
-        eyebrow="Overview"
-        title={league.name}
-        description="Competition control centre for divisions, fixtures, results and standings."
-      />
-
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          label="Divisions"
-          value={divisions.length}
-        />
-
-        <StatCard
-          label="Teams"
-          value={teams.length}
-        />
-
-        <StatCard
-          label="Fixtures"
-          value={fixtures.length}
-        />
-
-        <StatCard
-          label="Completed"
-          value={
-            completedFixtures.length
-          }
-        />
-      </div>
-
-      <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
-        <Card className="p-6">
-          <div className="flex items-center gap-2">
-            <CalendarDays className="size-5" />
-
-            <h3 className="font-semibold">
-              Next fixture
-            </h3>
-          </div>
-
-          {nextFixture ? (
-            <div className="mt-6">
-              <div className="text-xs text-white/35">
-                GW{" "}
-                {nextFixture.gameweek ??
-                  "?"}{" "}
-                ·{" "}
-                {divisionMap[
-                  nextFixture.division_id ??
-                    ""
-                ]?.name ??
-                  "Division"}
-              </div>
-
-              <div className="mt-3 flex items-center justify-between gap-4">
-                <span className="text-lg font-semibold">
-                  {teamMap[
-                    nextFixture.home_team_id ??
-                      ""
-                  ]?.name ??
-                    "Home"}
-                </span>
-
-                <span className="text-sm font-bold text-white/25">
-                  VS
-                </span>
-
-                <span className="text-right text-lg font-semibold">
-                  {teamMap[
-                    nextFixture.away_team_id ??
-                      ""
-                  ]?.name ??
-                    "Away"}
-                </span>
-              </div>
-
-              <div className="mt-5 border-t border-white/10 pt-4 text-sm text-white/45">
-                {new Intl.DateTimeFormat(
-                  "en-GB",
-                  {
-                    day: "2-digit",
-                    month: "short",
-                    year: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  },
-                ).format(
-                  new Date(
-                    nextFixture.kickoff_at,
-                  ),
-                )}
-              </div>
-
-              <div className="mt-2 text-xs text-white/30">
-                Deadline:{" "}
-                {nextFixture.deadline_at
-                  ? new Intl.DateTimeFormat(
-                      "en-GB",
-                      {
-                        day: "2-digit",
-                        month: "short",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      },
-                    ).format(
-                      new Date(
-                        nextFixture.deadline_at,
-                      ),
-                    )
-                  : "Not set"}
-              </div>
-            </div>
-          ) : (
-            <div className="mt-6 rounded-xl bg-white/[0.03] p-5 text-sm text-white/40">
-              No scheduled fixtures yet.
-            </div>
-          )}
-        </Card>
-
-        <Card className="p-6">
-          <div className="flex items-center gap-2">
-            <Trophy className="size-5" />
-
-            <h3 className="font-semibold">
-              Divisions
-            </h3>
-          </div>
-
-          <div className="mt-5 space-y-3">
-            {divisions.map(
-              (division) => {
-                const count =
-                  standings.filter(
-                    (row) =>
-                      row.division_id ===
-                      division.id,
-                  ).length;
-
-                return (
-                  <div
-                    key={division.id}
-                    className="flex items-center justify-between rounded-xl bg-white/[0.03] px-4 py-3"
-                  >
-                    <div>
-                      <div className="font-medium">
-                        {division.name}
-                      </div>
-
-                      <div className="text-xs text-white/35">
-                        {division.status ??
-                          "draft"}
-                      </div>
-                    </div>
-
-                    <span className="text-sm text-white/40">
-                      {count} teams
-                    </span>
-                  </div>
-                );
-              },
-            )}
-
-            {divisions.length ===
-              0 && (
-              <div className="text-sm text-white/40">
-                No divisions yet.
-              </div>
-            )}
-          </div>
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-function FixturesSection({
-  fixtures,
-  teamName,
-  divisionName,
-  formatDate,
-  selectedFixtureId,
-  setSelectedFixtureId,
-  getResult,
-  canManageLeague,
-  saving,
-  saveFixtureDeadline,
-  overrideFixture,
-  toDateTimeLocal,
-}: {
-  fixtures: Fixture[];
-  teamName: (
-    id: string | null,
-  ) => string;
-  divisionName: (
-    id: string | null,
-  ) => string;
-  formatDate: (
-    value: string | null,
-  ) => string;
-  selectedFixtureId: string | null;
-  setSelectedFixtureId: (
-    id: string | null,
-  ) => void;
-  getResult: (
-    id: string,
-  ) => Result | undefined;
-  canManageLeague: boolean;
-  saving: boolean;
-  saveFixtureDeadline: (
-    id: string,
-    deadline: string,
-  ) => Promise<void>;
-  overrideFixture: (
-    fixture: Fixture,
-  ) => Promise<void>;
-  toDateTimeLocal: (
-    value: string | null,
-  ) => string;
-}) {
-  const selectedFixture =
-    fixtures.find(
-      (fixture) =>
-        fixture.id ===
-        selectedFixtureId,
-    ) ?? null;
-
-  return (
-    <div className="space-y-6">
-      <SectionHeading
-        eyebrow="Fixtures"
-        title="Fixture schedule"
-        description="Manage generated fixtures, deadlines and authorised completion overrides."
-      />
-
-      {fixtures.length ===
-      0 ? (
-        <EmptyState text="No fixtures have been generated for this league yet." />
-      ) : (
-        <Card className="overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="border-b border-white/10 bg-white/[0.02] text-xs uppercase tracking-wider text-white/30">
-                <tr>
-                  <th className="px-5 py-4 text-left">
-                    GW
-                  </th>
-                  <th className="px-5 py-4 text-left">
-                    Match
-                  </th>
-                  <th className="px-5 py-4 text-left">
-                    Division
-                  </th>
-                  <th className="px-5 py-4 text-left">
-                    Kickoff
-                  </th>
-                  <th className="px-5 py-4 text-left">
-                    Deadline
-                  </th>
-                  <th className="px-5 py-4 text-left">
-                    Status
-                  </th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {fixtures.map(
-                  (fixture) => {
-                    const result =
-                      getResult(
-                        fixture.id,
-                      );
-
-                    const selected =
-                      selectedFixtureId ===
-                      fixture.id;
-
-                    return (
-                      <tr
-                        key={fixture.id}
-                        onClick={() =>
-                          setSelectedFixtureId(
-                            selected
-                              ? null
-                              : fixture.id,
-                          )
-                        }
-                        className={`cursor-pointer border-b border-white/5 transition hover:bg-white/[0.04] ${
-                          selected
-                            ? "bg-white/[0.05]"
-                            : ""
-                        }`}
-                      >
-                        <td className="px-5 py-4 text-white/50">
-                          {fixture.gameweek ??
-                            "—"}
-                        </td>
-
-                        <td className="px-5 py-4">
-                          <div className="font-medium">
-                            {teamName(
-                              fixture.home_team_id,
-                            )}{" "}
-                            <span className="text-white/25">
-                              vs
-                            </span>{" "}
-                            {teamName(
-                              fixture.away_team_id,
-                            )}
-                          </div>
-
-                          {result && (
-                            <div className="mt-1 text-xs text-white/35">
-                              Result recorded
-                            </div>
-                          )}
-                        </td>
-
-                        <td className="px-5 py-4 text-white/50">
-                          {divisionName(
-                            fixture.division_id,
-                          )}
-                        </td>
-
-                        <td className="px-5 py-4 text-white/50">
-                          {formatDate(
-                            fixture.kickoff_at,
-                          )}
-                        </td>
-
-                        <td className="px-5 py-4 text-white/50">
-                          {formatDate(
-                            fixture.deadline_at,
-                          )}
-                        </td>
-
-                        <td className="px-5 py-4">
-                          <StatusPill
-                            status={
-                              fixture.status
-                            }
-                          />
-                        </td>
-                      </tr>
-                    );
-                  },
-                )}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      )}
-
-      {selectedFixture && (
-        <Card className="p-6">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <div className="text-xs uppercase tracking-wider text-white/30">
-                Fixture control
-              </div>
-
-              <h3 className="mt-2 text-xl font-bold">
-                {teamName(
-                  selectedFixture.home_team_id,
-                )}{" "}
-                {selectedFixture.home_score ??
-                  getResult(
-                    selectedFixture.id,
-                  )?.home_score ??
-                  "—"}{" "}
-                <span className="text-white/20">
-                  -
-                </span>{" "}
-                {selectedFixture.away_score ??
-                  getResult(
-                    selectedFixture.id,
-                  )?.away_score ??
-                  "—"}{" "}
-                {teamName(
-                  selectedFixture.away_team_id,
-                )}
-              </h3>
-            </div>
-
-            <button
-              onClick={() =>
-                setSelectedFixtureId(
-                  null,
-                )
-              }
-              className="rounded-lg p-2 text-white/40 hover:bg-white/5 hover:text-white"
-            >
-              <X className="size-4" />
-            </button>
-          </div>
-
-          <div className="mt-6 grid gap-4 sm:grid-cols-3">
-            <InfoBox
-              label="Gameweek"
-              value={`GW ${selectedFixture.gameweek ?? "—"}`}
-            />
-
-            <InfoBox
-              label="Completion"
-              value={
-                selectedFixture.completion_source ??
-                "scheduled"
-              }
-            />
-
-            <InfoBox
-              label="Completed"
-              value={formatDate(
-                selectedFixture.completed_at,
-              )}
-            />
-          </div>
-
-          {canManageLeague &&
-            selectedFixture.status !==
-              "completed" && (
-              <div className="mt-6 border-t border-white/10 pt-6">
-                <div className="flex items-center gap-2">
-                  <Clock className="size-4 text-white/50" />
-
-                  <h4 className="font-semibold">
-                    Deadline control
-                  </h4>
-                </div>
-
-                <div className="mt-4 flex flex-col gap-3 sm:flex-row">
-                  <input
-                    type="datetime-local"
-                    defaultValue={toDateTimeLocal(
-                      selectedFixture.deadline_at,
-                    )}
-                    id={`deadline-${selectedFixture.id}`}
-                    className="flex-1 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm outline-none"
-                  />
-
-                  <button
-                    disabled={saving}
-                    onClick={() => {
-                      const input =
-                        document.getElementById(
-                          `deadline-${selectedFixture.id}`,
-                        ) as HTMLInputElement | null;
-
-                      void saveFixtureDeadline(
-                        selectedFixture.id,
-                        input?.value ?? "",
-                      );
-                    }}
-                    className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-black disabled:opacity-50"
-                  >
-                    Save deadline
-                  </button>
-                </div>
-
-                <button
-                  disabled={saving}
-                  onClick={() =>
-                    void overrideFixture(
-                      selectedFixture,
-                    )
-                  }
-                  className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 px-5 py-3 text-sm font-semibold text-red-300 hover:bg-red-500/15 disabled:opacity-50"
-                >
-                  Complete as authorised 0-0
-                </button>
-              </div>
-            )}
-
-          {selectedFixture.completion_note && (
-            <div className="mt-5 rounded-xl bg-white/[0.03] p-4 text-sm text-white/45">
-              {selectedFixture.completion_note}
-            </div>
-          )}
-        </Card>
-      )}
-    </div>
-  );
-}
-
-function ResultsSection({
-  fixtures,
-  results,
-  teamName,
-  divisionName,
-  formatDate,
-}: {
-  fixtures: Fixture[];
-  results: Result[];
-  teamName: (
-    id: string | null,
-  ) => string;
-  divisionName: (
-    id: string | null,
-  ) => string;
-  formatDate: (
-    value: string | null,
-  ) => string;
-}) {
-  const resultMap = useMemo(() => {
-    const map: Record<
-      string,
-      Result
-    > = {};
-
-    for (const result of results) {
-      map[result.fixture_id] =
-        result;
-    }
-
-    return map;
-  }, [results]);
-
-  return (
-    <div className="space-y-6">
-      <SectionHeading
-        eyebrow="Results"
-        title="Completed results"
-        description="Official completed fixtures and their recording information."
-      />
-
-      {fixtures.length ===
-      0 ? (
-        <EmptyState text="No completed results yet." />
-      ) : (
-        <div className="space-y-3">
-          {fixtures.map(
-            (fixture) => {
-              const result =
-                resultMap[
-                  fixture.id
-                ];
-
-              return (
-                <Card
-                  key={fixture.id}
-                  className="p-5"
-                >
-                  <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                    <div>
-                      <div className="text-xs text-white/30">
-                        GW{" "}
-                        {fixture.gameweek ??
-                          "—"}{" "}
-                        ·{" "}
-                        {divisionName(
-                          fixture.division_id,
-                        )}
-                      </div>
-
-                      <div className="mt-2 text-lg font-bold">
-                        {teamName(
-                          fixture.home_team_id,
-                        )}{" "}
-                        <span className="text-white/30">
-                          {fixture.home_score ??
-                            result?.home_score ??
-                            0}
-                        </span>{" "}
-                        -{" "}
-                        <span className="text-white/30">
-                          {fixture.away_score ??
-                            result?.away_score ??
-                            0}
-                        </span>{" "}
-                        {teamName(
-                          fixture.away_team_id,
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="text-sm text-white/40 lg:text-right">
-                      <div>
-                        {result
-                          ? `Recorded ${formatDate(result.recorded_at)}`
-                          : "Automatic completion"}
-                      </div>
-
-                      <div className="mt-1 text-xs">
-                        {fixture.completion_source ??
-                          "manual"}
-                      </div>
-                    </div>
-                  </div>
-
-                  {result?.replay_code && (
-                    <div className="mt-4 border-t border-white/10 pt-4 text-xs text-white/35">
-                      Replay:{" "}
-                      {result.replay_code}
-                    </div>
-                  )}
-
-                  {result?.notes && (
-                    <div className="mt-3 text-sm text-white/45">
-                      {result.notes}
-                    </div>
-                  )}
-                </Card>
-              );
-            },
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function TableSection({
-  standings,
-  teams,
-  divisions,
-  adjustments,
-}: {
-  standings: Standing[];
-  teams: Team[];
-  divisions: Division[];
-  adjustments: PointAdjustment[];
-}) {
-  const teamMap = useMemo(() => {
-    const map: Record<
-      string,
-      Team
-    > = {};
-
-    for (const team of teams) {
-      map[team.id] = team;
-    }
-
-    return map;
-  }, [teams]);
-
-  const adjustmentMap =
-    useMemo(() => {
-      const map: Record<
-        string,
-        number
-      > = {};
-
-      for (const adjustment of adjustments) {
-        const key = `${adjustment.division_id}:${adjustment.team_id}`;
-
-        map[key] =
-          (map[key] ?? 0) +
-          adjustment.points_delta;
-      }
-
-      return map;
-    }, [adjustments]);
-
-  const divisionMap =
-    useMemo(() => {
-      const map: Record<
-        string,
-        Division
-      > = {};
-
-      for (const division of divisions) {
-        map[division.id] =
-          division;
-      }
-
-      return map;
-    }, [divisions]);
-
-  const grouped = useMemo(() => {
-    const map: Record<
-      string,
-      Standing[]
-    > = {};
-
-    for (const row of standings) {
-      if (!map[row.division_id]) {
-        map[row.division_id] = [];
-      }
-
-      map[row.division_id].push(
-        row,
-      );
-    }
-
-    for (const rows of Object.values(
-      map,
-    )) {
-      rows.sort(
-        (a, b) =>
-          b.points - a.points ||
-          b.goal_difference -
-            a.goal_difference ||
-          b.goals_for -
-            a.goals_for,
-      );
-    }
-
-    return map;
-  }, [standings]);
-
-  return (
-    <div className="space-y-6">
-      <SectionHeading
-        eyebrow="Table"
-        title="League standings"
-        description="Live standings including authorised point adjustments."
-      />
-
-      {Object.entries(grouped).map(
-        ([divisionId, rows]) => {
-          const division =
-            divisionMap[
-              divisionId
-            ];
-
-          return (
-            <Card
-              key={divisionId}
-              className="overflow-hidden"
-            >
-              <div className="border-b border-white/10 px-5 py-5">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="font-semibold">
-                      {division?.name ??
-                        "Division"}
-                    </h3>
-
-                    <p className="mt-1 text-xs text-white/35">
-                      {division?.points_tier ??
-                        "unranked"}{" "}
-                      scoring tier
-                    </p>
-                  </div>
-
-                  <Trophy className="size-5 text-white/30" />
-                </div>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="text-xs uppercase tracking-wider text-white/25">
-                    <tr>
-                      <th className="px-4 py-3 text-left">
-                        #
-                      </th>
-                      <th className="px-4 py-3 text-left">
-                        Team
-                      </th>
-                      <th className="px-4 py-3">
-                        P
-                      </th>
-                      <th className="px-4 py-3">
-                        W
-                      </th>
-                      <th className="px-4 py-3">
-                        D
-                      </th>
-                      <th className="px-4 py-3">
-                        L
-                      </th>
-                      <th className="px-4 py-3">
-                        GF
-                      </th>
-                      <th className="px-4 py-3">
-                        GA
-                      </th>
-                      <th className="px-4 py-3">
-                        GD
-                      </th>
-                      <th className="px-4 py-3 text-right">
-                        PTS
-                      </th>
-                    </tr>
-                  </thead>
-
-                  <tbody>
-                    {rows.map(
-                      (
-                        row,
-                        index,
-                      ) => {
-                        const adjustment =
-                          adjustmentMap[
-                            `${divisionId}:${row.team_id}`
-                          ] ?? 0;
-
-                        return (
-                          <tr
-                            key={row.id}
-                            className="border-t border-white/5"
-                          >
-                            <td className="px-4 py-4 text-white/35">
-                              {index + 1}
-                            </td>
-
-                            <td className="px-4 py-4 font-medium">
-                              {teamMap[
-                                row.team_id
-                              ]?.name ??
-                                "Unknown"}
-                            </td>
-
-                            <td className="px-4 py-4 text-center text-white/50">
-                              {row.played}
-                            </td>
-
-                            <td className="px-4 py-4 text-center text-white/50">
-                              {row.won}
-                            </td>
-
-                            <td className="px-4 py-4 text-center text-white/50">
-                              {row.drawn}
-                            </td>
-
-                            <td className="px-4 py-4 text-center text-white/50">
-                              {row.lost}
-                            </td>
-
-                            <td className="px-4 py-4 text-center text-white/50">
-                              {row.goals_for}
-                            </td>
-
-                            <td className="px-4 py-4 text-center text-white/50">
-                              {row.goals_against}
-                            </td>
-
-                            <td className="px-4 py-4 text-center">
-                              {row.goal_difference >
-                              0
-                                ? `+${row.goal_difference}`
-                                : row.goal_difference}
-                            </td>
-
-                            <td className="px-4 py-4 text-right font-bold">
-                              {row.points}
-
-                              {adjustment !==
-                                0 && (
-                                <span
-                                  className={`ml-2 text-xs font-medium ${
-                                    adjustment <
-                                    0
-                                      ? "text-red-400"
-                                      : "text-emerald-400"
-                                  }`}
-                                >
-                                  (
-                                  {adjustment >
-                                  0
-                                    ? "+"
-                                    : ""}
-                                  {
-                                    adjustment
-                                  }
-                                  )
-                                </span>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      },
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
-          );
-        },
-      )}
-
-      {Object.keys(grouped)
-        .length === 0 && (
-        <EmptyState text="Standings will appear here once divisions and teams are active." />
-      )}
-    </div>
-  );
-}
-
-function TeamsSection({
-  teams,
-  divisions,
-  profiles,
-  teamStaff,
-}: {
-  teams: Team[];
-  divisions: Division[];
-  profiles: Record<
-    string,
-    Profile
-  >;
-  teamStaff: TeamStaff[];
-}) {
-  const divisionMap = useMemo(
-    () => {
-      const map: Record<
-        string,
-        Division
-      > = {};
-
-      for (const division of divisions) {
-        map[division.id] =
-          division;
-      }
-
-      return map;
-    },
-    [divisions],
-  );
-
-  return (
-    <div className="space-y-6">
-      <SectionHeading
-        eyebrow="Teams"
-        title="League teams"
-        description="Every registered team, its division, manager and co-managers."
-      />
-
-      {teams.length ===
-      0 ? (
-        <EmptyState text="No teams are registered in this league yet." />
-      ) : (
-        <div className="grid gap-4 lg:grid-cols-2">
-          {teams.map((team) => {
-            const manager =
-              team.manager_id
-                ? profiles[
-                    team.manager_id
-                  ]
-                : null;
-
-            const coManagers =
-              teamStaff.filter(
-                (staff) =>
-                  staff.team_id ===
-                    team.id &&
-                  staff.role ===
-                    "co_manager",
-              );
-
-            return (
-              <Card
-                key={team.id}
-                className="p-5"
-              >
-                <div className="flex items-start gap-4">
-                  {team.logo_url ? (
-                    <img
-                      src={team.logo_url}
-                      alt=""
-                      className="size-12 rounded-xl bg-white/5 object-contain"
-                    />
-                  ) : (
-                    <div className="flex size-12 items-center justify-center rounded-xl bg-white/10">
-                      <Users className="size-5" />
-                    </div>
-                  )}
-
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="font-bold">
-                        {team.name}
-                      </h3>
-
-                      {team.short_name && (
-                        <span className="text-xs text-white/30">
-                          {team.short_name}
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="mt-1 text-xs text-white/35">
-                      {divisionMap[
-                        team.division_id ??
-                          ""
-                      ]?.name ??
-                        "Unassigned division"}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-xl bg-white/[0.03] p-4">
-                    <div className="text-[10px] uppercase tracking-wider text-white/30">
-                      Manager
-                    </div>
-
-                    <div className="mt-2 text-sm font-medium">
-                      {manager?.display_name ??
-                        manager?.username ??
-                        "Unassigned"}
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl bg-white/[0.03] p-4">
-                    <div className="text-[10px] uppercase tracking-wider text-white/30">
-                      Co-Managers
-                    </div>
-
-                    {coManagers.length >
-                    0 ? (
-                      <div className="mt-2 space-y-1">
-                        {coManagers.map(
-                          (staff) => {
-                            const profile =
-                              profiles[
-                                staff.user_id
-                              ];
-
-                            return (
-                              <div
-                                key={
-                                  staff.id
-                                }
-                                className="text-sm font-medium"
-                              >
-                                {profile?.display_name ??
-                                  profile?.username ??
-                                  "Unknown"}
-                              </div>
-                            );
-                          },
-                        )}
-                      </div>
-                    ) : (
-                      <div className="mt-2 text-sm text-white/35">
-                        None
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </Card>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function DivisionsSection({
-  divisions,
-  teams,
-  isOwner,
-  canManageLeague,
-  newDivisionName,
-  setNewDivisionName,
-  newDivisionTier,
-  setNewDivisionTier,
-  createDivision,
-  updateDivisionTier,
-  changeDivisionStatus,
-  saving,
-}: {
-  divisions: Division[];
-  teams: Team[];
-  isOwner: boolean;
-  canManageLeague: boolean;
-  newDivisionName: string;
-  setNewDivisionName: (
-    value: string,
-  ) => void;
-  newDivisionTier: string;
-  setNewDivisionTier: (
-    value: string,
-  ) => void;
-  createDivision: () => Promise<void>;
-  updateDivisionTier: (
-    id: string,
-    tier: Division["points_tier"],
-  ) => Promise<void>;
-  changeDivisionStatus: (
-    id: string,
-    status: string,
-  ) => Promise<void>;
-  saving: boolean;
-}) {
-  return (
-    <div className="space-y-6">
-      <SectionHeading
-        eyebrow="Divisions"
-        title="Division control"
-        description="Create divisions, start or end them, and configure NOVA Points scoring tiers."
-      />
-
-      {canManageLeague && (
-        <Card className="p-6">
-          <div className="grid gap-3 md:grid-cols-[1fr_140px_auto]">
-            <input
-              value={newDivisionName}
-              onChange={(event) =>
-                setNewDivisionName(
-                  event.target.value,
-                )
-              }
-              placeholder="Division name"
-              className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm outline-none placeholder:text-white/25"
-            />
-
-            <select
-              value={newDivisionTier}
-              onChange={(event) =>
-                setNewDivisionTier(
-                  event.target.value,
-                )
-              }
-              className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm outline-none"
-            >
-              <option
-                value="1"
-                className="bg-black"
-              >
-                Tier 1
-              </option>
-
-              <option
-                value="2"
-                className="bg-black"
-              >
-                Tier 2
-              </option>
-
-              <option
-                value="3"
-                className="bg-black"
-              >
-                Tier 3
-              </option>
-            </select>
-
-            <button
-              onClick={() =>
-                void createDivision()
-              }
-              disabled={saving}
-              className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-black disabled:opacity-50"
-            >
-              Create
-            </button>
-          </div>
-        </Card>
-      )}
-
-      <div className="grid gap-4">
-        {divisions.map(
-          (division) => {
-            const teamCount =
-              teams.filter(
-                (team) =>
-                  team.division_id ===
-                  division.id,
-              ).length;
-
-            return (
-              <Card
-                key={division.id}
-                className="p-6"
-              >
-                <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-3">
-                      <h3 className="text-lg font-bold">
-                        {division.name}
-                      </h3>
-
-                      <StatusPill
-                        status={
-                          division.status ??
-                          "draft"
-                        }
-                      />
-                    </div>
-
-                    <div className="mt-2 flex flex-wrap gap-3 text-xs text-white/35">
-                      <span>
-                        Tier{" "}
-                        {division.tier ??
-                          "—"}
-                      </span>
-
-                      <span>
-                        {teamCount} teams
-                      </span>
-
-                      <span>
-                        GW every{" "}
-                        {division.gameweek_interval_days ??
-                          3}{" "}
-                        days
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col gap-3 sm:flex-row">
-                    <div>
-                      <label className="mb-1 block text-[10px] uppercase tracking-wider text-white/30">
-                        Points tier
-                      </label>
-
-                      <select
-                        value={
-                          division.points_tier ??
-                          "unranked"
-                        }
-                        disabled={
-                          !isOwner ||
-                          saving
-                        }
-                        onChange={(
-                          event,
-                        ) =>
-                          void updateDivisionTier(
-                            division.id,
-                            event.target
-                              .value as Division["points_tier"],
-                          )
-                        }
-                        className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm outline-none disabled:opacity-50"
-                      >
-                        {TIER_OPTIONS.map(
-                          (option) => (
-                            <option
-                              key={
-                                option.value
-                              }
-                              value={
-                                option.value
-                              }
-                              className="bg-black"
-                            >
-                              {
-                                option.label
-                              }
-                            </option>
-                          ),
-                        )}
-                      </select>
-                    </div>
-
-                    {canManageLeague && (
-                      <div>
-                        <label className="mb-1 block text-[10px] uppercase tracking-wider text-white/30">
-                          Status
-                        </label>
-
-                        <select
-                          value={
-                            division.status ??
-                            "draft"
-                          }
-                          disabled={
-                            saving
-                          }
-                          onChange={(
-                            event,
-                          ) =>
-                            void changeDivisionStatus(
-                              division.id,
-                              event.target
-                                .value,
-                            )
-                          }
-                          className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm outline-none disabled:opacity-50"
-                        >
-                          <option
-                            value="draft"
-                            className="bg-black"
-                          >
-                            Draft
-                          </option>
-
-                          <option
-                            value="active"
-                            className="bg-black"
-                          >
-                            Active
-                          </option>
-
-                          <option
-                            value="ended"
-                            className="bg-black"
-                          >
-                            Ended
-                          </option>
-                        </select>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </Card>
-            );
-          },
-        )}
-
-        {divisions.length ===
-          0 && (
-          <EmptyState text="Create the first division to start building the league." />
-        )}
-      </div>
-    </div>
-  );
-}
-
-function DeductionsSection({
-  divisions,
-  teams,
-  adjustments,
-  profiles,
-  deductionDivisionId,
-  setDeductionDivisionId,
-  deductionTeamId,
-  setDeductionTeamId,
-  deductionAmount,
-  setDeductionAmount,
-  deductionReason,
-  setDeductionReason,
-  applyDeduction,
-  canManageLeague,
-  saving,
-}: {
-  divisions: Division[];
-  teams: Team[];
-  adjustments: PointAdjustment[];
-  profiles: Record<
-    string,
-    Profile
-  >;
-  deductionDivisionId: string;
-  setDeductionDivisionId: (
-    value: string,
-  ) => void;
-  deductionTeamId: string;
-  setDeductionTeamId: (
-    value: string,
-  ) => void;
-  deductionAmount: string;
-  setDeductionAmount: (
-    value: string,
-  ) => void;
-  deductionReason: string;
-  setDeductionReason: (
-    value: string,
-  ) => void;
-  applyDeduction: () => Promise<void>;
-  canManageLeague: boolean;
-  saving: boolean;
-}) {
-  const divisionTeams =
-    teams.filter(
-      (team) =>
-        team.division_id ===
-        deductionDivisionId,
-    );
-
-  return (
-    <div className="space-y-6">
-      <SectionHeading
-        eyebrow="Discipline"
-        title="Table point adjustments"
-        description="Apply or restore table points through the existing secure standings RPC."
-      />
-
-      {canManageLeague ? (
-        <Card className="p-6">
-          <div className="grid gap-4 lg:grid-cols-2">
-            <div>
-              <label className="mb-2 block text-xs uppercase tracking-wider text-white/30">
-                Division
-              </label>
-
-              <select
-                value={
-                  deductionDivisionId
-                }
-                onChange={(event) => {
-                  setDeductionDivisionId(
-                    event.target.value,
-                  );
-                  setDeductionTeamId("");
-                }}
-                className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm outline-none"
-              >
-                <option
-                  value=""
-                  className="bg-black"
-                >
-                  Select division
-                </option>
-
-                {divisions.map(
-                  (division) => (
-                    <option
-                      key={division.id}
-                      value={division.id}
-                      className="bg-black"
-                    >
-                      {division.name}
-                    </option>
-                  ),
-                )}
-              </select>
-            </div>
-
-            <div>
-              <label className="mb-2 block text-xs uppercase tracking-wider text-white/30">
-                Team
-              </label>
-
-              <select
-                value={
-                  deductionTeamId
-                }
-                onChange={(event) =>
-                  setDeductionTeamId(
-                    event.target.value,
-                  )
-                }
-                disabled={
-                  !deductionDivisionId
-                }
-                className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm outline-none disabled:opacity-40"
-              >
-                <option
-                  value=""
-                  className="bg-black"
-                >
-                  Select team
-                </option>
-
-                {divisionTeams.map(
-                  (team) => (
-                    <option
-                      key={team.id}
-                      value={team.id}
-                      className="bg-black"
-                    >
-                      {team.name}
-                    </option>
-                  ),
-                )}
-              </select>
-            </div>
-
-            <div>
-              <label className="mb-2 block text-xs uppercase tracking-wider text-white/30">
-                Points
-              </label>
-
-              <input
-                type="number"
-                value={
-                  deductionAmount
-                }
-                onChange={(event) =>
-                  setDeductionAmount(
-                    event.target.value,
-                  )
-                }
-                placeholder="-3 or +3"
-                className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm outline-none placeholder:text-white/25"
-              />
-            </div>
-
-            <div>
-              <label className="mb-2 block text-xs uppercase tracking-wider text-white/30">
-                Reason
-              </label>
-
-              <input
-                value={
-                  deductionReason
-                }
-                onChange={(event) =>
-                  setDeductionReason(
-                    event.target.value,
-                  )
-                }
-                placeholder="Failed to fulfil fixture"
-                className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm outline-none placeholder:text-white/25"
-              />
-            </div>
-          </div>
-
-          <button
-            onClick={() =>
-              void applyDeduction()
-            }
-            disabled={
-              saving ||
-              !deductionTeamId
-            }
-            className="mt-5 rounded-xl bg-white px-5 py-3 text-sm font-semibold text-black disabled:opacity-40"
-          >
-            Apply adjustment
-          </button>
-        </Card>
-      ) : (
-        <Card className="p-6">
-          <div className="text-sm text-white/45">
-            You can view point adjustments, but you don't have permission to apply them.
-          </div>
-        </Card>
-      )}
-
-      <Card className="overflow-hidden">
-        <div className="border-b border-white/10 px-5 py-5">
-          <h3 className="font-semibold">
-            Adjustment history
-          </h3>
-        </div>
-
-        {adjustments.length ===
-        0 ? (
-          <div className="p-6 text-sm text-white/40">
-            No point adjustments have been recorded.
-          </div>
-        ) : (
-          <div className="divide-y divide-white/5">
-            {adjustments.map(
-              (adjustment) => {
-                const profile =
-                  adjustment.applied_by
-                    ? profiles[
-                        adjustment.applied_by
-                      ]
-                    : null;
-
-                const team =
-                  teams.find(
-                    (item) =>
-                      item.id ===
-                      adjustment.team_id,
-                  );
-
-                return (
-                  <div
-                    key={
-                      adjustment.id
-                    }
-                    className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"
-                  >
-                    <div>
-                      <div className="font-medium">
-                        {team?.name ??
-                          "Unknown team"}
-                      </div>
-
-                      <div className="mt-1 text-sm text-white/40">
-                        {
-                          adjustment.reason
-                        }
-                      </div>
-                    </div>
-
-                    <div className="sm:text-right">
-                      <div
-                        className={`font-bold ${
-                          adjustment.points_delta <
-                          0
-                            ? "text-red-400"
-                            : "text-emerald-400"
-                        }`}
-                      >
-                        {adjustment.points_delta >
-                        0
-                          ? "+"
-                          : ""}
-                        {
-                          adjustment.points_delta
-                        }{" "}
-                        pts
-                      </div>
-
-                      <div className="mt-1 text-xs text-white/30">
-                        {profile?.display_name ??
-                          profile?.username ??
-                          "NOVA staff"}
-                        {" · "}
-                        {new Intl.DateTimeFormat(
-                          "en-GB",
-                          {
-                            day: "2-digit",
-                            month:
-                              "short",
-                            year:
-                              "numeric",
-                          },
-                        ).format(
-                          new Date(
-                            adjustment.created_at,
-                          ),
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              },
-            )}
-          </div>
-        )}
-      </Card>
-    </div>
-  );
-}
-
-function OverseersSection({
-  members,
-  profiles,
-  newOverseerUsername,
-  setNewOverseerUsername,
-  addCoOverseer,
-  removeMember,
-  canManageLeague,
-  saving,
-}: {
-  members: LeagueMember[];
-  profiles: Record<
-    string,
-    Profile
-  >;
-  newOverseerUsername: string;
-  setNewOverseerUsername: (
-    value: string,
-  ) => void;
-  addCoOverseer: () => Promise<void>;
-  removeMember: (
-    id: string,
-  ) => Promise<void>;
-  canManageLeague: boolean;
-  saving: boolean;
-}) {
-  return (
-    <div className="space-y-6">
-      <SectionHeading
-        eyebrow="Staff"
-        title="League overseers"
-        description="Manage the people authorised to operate this league."
-      />
-
-      {canManageLeague && (
-        <Card className="p-6">
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <input
-              value={
-                newOverseerUsername
-              }
-              onChange={(event) =>
-                setNewOverseerUsername(
-                  event.target.value,
-                )
-              }
-              placeholder="NOVA username or Discord ID"
-              className="flex-1 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm outline-none placeholder:text-white/25"
-            />
-
-            <button
-              onClick={() =>
-                void addCoOverseer()
-              }
-              disabled={saving}
-              className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-black disabled:opacity-50"
-            >
-              Add Co-Overseer
-            </button>
-          </div>
-        </Card>
-      )}
-
-      <div className="grid gap-3">
-        {members.map(
-          (member) => {
-            const profile =
-              profiles[
-                member.user_id
-              ];
-
-            return (
-              <Card
-                key={member.id}
-                className="p-5"
-              >
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex min-w-0 items-center gap-4">
-                    <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-white/10">
-                      <Shield className="size-4" />
-                    </div>
-
-                    <div className="min-w-0">
-                      <div className="truncate font-semibold">
-                        {profile?.display_name ??
-                          profile?.username ??
-                          "Unknown user"}
-                      </div>
-
-                      <div className="mt-1 text-xs text-white/35">
-                        {member.role ===
-                        "co_overseer"
-                          ? "Co-Overseer"
-                          : "Overseer"}
-                      </div>
-                    </div>
-                  </div>
-
-                  {canManageLeague &&
-                    member.role ===
-                      "co_overseer" && (
-                      <button
-                        onClick={() =>
-                          void removeMember(
-                            member.id,
-                          )
-                        }
-                        disabled={
-                          saving
-                        }
-                        className="rounded-lg border border-red-500/20 px-3 py-2 text-xs text-red-300 hover:bg-red-500/10 disabled:opacity-50"
-                      >
-                        Remove
-                      </button>
-                    )}
-                </div>
-              </Card>
-            );
-          },
-        )}
-
-        {members.length ===
-          0 && (
-          <EmptyState text="No league staff have been assigned." />
-        )}
-      </div>
-    </div>
-  );
+  return localDate.toISOString().slice(0, 16);
 }
