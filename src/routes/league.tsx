@@ -1,12 +1,12 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   CalendarDays,
   Check,
   ChevronRight,
   CircleAlert,
+  Clock,
   Loader2,
-  Plus,
   RefreshCw,
   Shield,
   Trophy,
@@ -32,6 +32,8 @@ type Division = {
   tier: number | null;
   season: string | null;
   status: string | null;
+  start_date: string | null;
+  ended_at: string | null;
   gameweek_interval_days: number | null;
   points_tier:
     | "unranked"
@@ -65,9 +67,17 @@ type LeagueMember = {
   role: "overseer" | "co_overseer";
 };
 
+type TeamStaff = {
+  id: string;
+  team_id: string;
+  user_id: string;
+  role: string;
+};
+
 type Fixture = {
   id: string;
-  division_id: string;
+  league_id: string | null;
+  division_id: string | null;
   gameweek: number | null;
   kickoff_at: string;
   deadline_at: string | null;
@@ -78,6 +88,7 @@ type Fixture = {
   away_team_id: string | null;
   completion_source: string | null;
   completion_note: string | null;
+  completed_at: string | null;
 };
 
 type Result = {
@@ -87,6 +98,7 @@ type Result = {
   notes: string | null;
   recorded_at: string;
   submitted_by: string | null;
+  replay_code: string | null;
 };
 
 type Standing = {
@@ -149,6 +161,7 @@ function LeaguePanel() {
   const [teams, setTeams] = useState<Team[]>([]);
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
   const [members, setMembers] = useState<LeagueMember[]>([]);
+  const [teamStaff, setTeamStaff] = useState<TeamStaff[]>([]);
   const [fixtures, setFixtures] = useState<Fixture[]>([]);
   const [results, setResults] = useState<Result[]>([]);
   const [standings, setStandings] = useState<Standing[]>([]);
@@ -165,7 +178,10 @@ function LeaguePanel() {
     useState<Section>("overview");
 
   const [selectedDivisionId, setSelectedDivisionId] =
-    useState<string>("all");
+    useState("all");
+
+  const [selectedFixtureId, setSelectedFixtureId] =
+    useState<string | null>(null);
 
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -185,24 +201,38 @@ function LeaguePanel() {
   const [newOverseerUsername, setNewOverseerUsername] =
     useState("");
 
-  const [selectedFixtureId, setSelectedFixtureId] =
-    useState<string | null>(null);
-
   const canManageLeague =
     isOwner ||
     isAdmin ||
     memberRole === "overseer" ||
     memberRole === "co_overseer";
 
-  const selectedDivision =
-    selectedDivisionId === "all"
-      ? null
-      : divisions.find(
-          (division) => division.id === selectedDivisionId,
-        ) ?? null;
+  const teamMap = useMemo(() => {
+    const map: Record<string, Team> = {};
+
+    for (const team of teams) {
+      map[team.id] = team;
+    }
+
+    return map;
+  }, [teams]);
+
+  const divisionMap = useMemo(() => {
+    const map: Record<string, Division> = {};
+
+    for (const division of divisions) {
+      map[division.id] = division;
+    }
+
+    return map;
+  }, [divisions]);
+
+  const profileMap = profiles;
 
   const visibleFixtures = useMemo(() => {
-    if (selectedDivisionId === "all") return fixtures;
+    if (selectedDivisionId === "all") {
+      return fixtures;
+    }
 
     return fixtures.filter(
       (fixture) =>
@@ -211,7 +241,9 @@ function LeaguePanel() {
   }, [fixtures, selectedDivisionId]);
 
   const visibleStandings = useMemo(() => {
-    if (selectedDivisionId === "all") return standings;
+    if (selectedDivisionId === "all") {
+      return standings;
+    }
 
     return standings.filter(
       (standing) =>
@@ -220,7 +252,9 @@ function LeaguePanel() {
   }, [standings, selectedDivisionId]);
 
   const visibleAdjustments = useMemo(() => {
-    if (selectedDivisionId === "all") return adjustments;
+    if (selectedDivisionId === "all") {
+      return adjustments;
+    }
 
     return adjustments.filter(
       (adjustment) =>
@@ -246,34 +280,17 @@ function LeaguePanel() {
     [visibleFixtures],
   );
 
-  const teamMap = useMemo(() => {
-    const map: Record<string, Team> = {};
-
-    for (const team of teams) {
-      map[team.id] = team;
-    }
-
-    return map;
-  }, [teams]);
-
-  const divisionMap = useMemo(() => {
-    const map: Record<string, Division> = {};
-
-    for (const division of divisions) {
-      map[division.id] = division;
-    }
-
-    return map;
-  }, [divisions]);
-
   useEffect(() => {
     void loadPanel();
   }, []);
 
   async function loadPanel(showSpinner = true) {
     try {
-      if (showSpinner) setLoading(true);
-      else setRefreshing(true);
+      if (showSpinner) {
+        setLoading(true);
+      } else {
+        setRefreshing(true);
+      }
 
       setError(null);
 
@@ -310,23 +327,24 @@ function LeaguePanel() {
 
       const admin = (roleRows ?? []).some(
         (row) =>
-          String(row.role).toLowerCase() ===
-          "admin",
+          String(row.role).toLowerCase() === "admin",
       );
 
       setIsAdmin(admin);
 
-      const { data: membershipRows, error: membershipError } =
-        await supabase
-          .from("league_members")
-          .select(
-            "id,league_id,user_id,role",
-          )
-          .eq("user_id", user.id)
-          .in("role", [
-            "overseer",
-            "co_overseer",
-          ]);
+      const {
+        data: membershipRows,
+        error: membershipError,
+      } = await supabase
+        .from("league_members")
+        .select(
+          "id,league_id,user_id,role",
+        )
+        .eq("user_id", user.id)
+        .in("role", [
+          "overseer",
+          "co_overseer",
+        ]);
 
       if (membershipError) {
         throw new Error(
@@ -352,17 +370,18 @@ function LeaguePanel() {
         memberships[0] ?? null;
 
       if (!membership && (admin || owner)) {
-        const { data: fallbackMembership } =
-          await supabase
-            .from("league_members")
-            .select(
-              "id,league_id,user_id,role",
-            )
-            .order("created_at", {
-              ascending: true,
-            })
-            .limit(1)
-            .maybeSingle();
+        const {
+          data: fallbackMembership,
+        } = await supabase
+          .from("league_members")
+          .select(
+            "id,league_id,user_id,role",
+          )
+          .order("created_at", {
+            ascending: true,
+          })
+          .limit(1)
+          .maybeSingle();
 
         membership =
           (fallbackMembership as LeagueMember | null) ??
@@ -377,14 +396,14 @@ function LeaguePanel() {
 
       setMemberRole(membership.role);
 
-      const leagueId =
-        membership.league_id;
+      const leagueId = membership.league_id;
 
       const [
         leagueResponse,
         divisionsResponse,
         teamsResponse,
         membersResponse,
+        staffResponse,
         fixturesResponse,
         standingsResponse,
         resultsResponse,
@@ -401,7 +420,7 @@ function LeaguePanel() {
         supabase
           .from("divisions")
           .select(
-            "id,league_id,name,tier,season,status,gameweek_interval_days,points_tier",
+            "id,league_id,name,tier,season,status,start_date,ended_at,gameweek_interval_days,points_tier",
           )
           .eq("league_id", leagueId)
           .order("tier", {
@@ -432,9 +451,15 @@ function LeaguePanel() {
           }),
 
         supabase
+          .from("team_staff")
+          .select(
+            "id,team_id,user_id,role",
+          ),
+
+        supabase
           .from("fixtures")
           .select(
-            "id,division_id,gameweek,kickoff_at,deadline_at,status,home_score,away_score,home_team_id,away_team_id,completion_source,completion_note",
+            "id,league_id,division_id,gameweek,kickoff_at,deadline_at,status,home_score,away_score,home_team_id,away_team_id,completion_source,completion_note,completed_at",
           )
           .eq("league_id", leagueId)
           .order("kickoff_at", {
@@ -453,7 +478,7 @@ function LeaguePanel() {
         supabase
           .from("results")
           .select(
-            "fixture_id,home_score,away_score,notes,recorded_at,submitted_by",
+            "fixture_id,home_score,away_score,notes,recorded_at,submitted_by,replay_code",
           )
           .order("recorded_at", {
             ascending: false,
@@ -469,40 +494,59 @@ function LeaguePanel() {
           }),
       ]);
 
-      if (leagueResponse.error)
+      if (leagueResponse.error) {
         throw new Error(
           leagueResponse.error.message,
         );
+      }
 
-      if (divisionsResponse.error)
+      if (divisionsResponse.error) {
         throw new Error(
           divisionsResponse.error.message,
         );
+      }
 
-      if (teamsResponse.error)
+      if (teamsResponse.error) {
         throw new Error(
           teamsResponse.error.message,
         );
+      }
 
-      if (fixturesResponse.error)
+      if (membersResponse.error) {
+        throw new Error(
+          membersResponse.error.message,
+        );
+      }
+
+      if (staffResponse.error) {
+        throw new Error(
+          staffResponse.error.message,
+        );
+      }
+
+      if (fixturesResponse.error) {
         throw new Error(
           fixturesResponse.error.message,
         );
+      }
 
-      if (standingsResponse.error)
+      if (standingsResponse.error) {
         throw new Error(
           standingsResponse.error.message,
         );
+      }
 
-      if (resultsResponse.error)
+      if (resultsResponse.error) {
         throw new Error(
           resultsResponse.error.message,
         );
+      }
 
-      if (adjustmentResponse.error)
+      if (adjustmentResponse.error) {
         throw new Error(
           adjustmentResponse.error.message,
         );
+      }
 
       const loadedLeague =
         leagueResponse.data as League | null;
@@ -514,37 +558,38 @@ function LeaguePanel() {
       }
 
       const loadedDivisions =
-        (divisionsResponse.data ??
-          []) as Division[];
+        (divisionsResponse.data ?? []) as Division[];
 
       const loadedTeams =
-        (teamsResponse.data ??
-          []) as Team[];
+        (teamsResponse.data ?? []) as Team[];
 
       const loadedMembers =
-        (membersResponse.data ??
-          []) as LeagueMember[];
+        (membersResponse.data ?? []) as LeagueMember[];
+
+      const loadedStaff =
+        (staffResponse.data ?? []) as TeamStaff[];
+
+      const loadedFixtures =
+        (fixturesResponse.data ?? []) as Fixture[];
+
+      const loadedStandings =
+        (standingsResponse.data ?? []) as Standing[];
+
+      const loadedResults =
+        (resultsResponse.data ?? []) as Result[];
+
+      const loadedAdjustments =
+        (adjustmentResponse.data ?? []) as PointAdjustment[];
 
       setLeague(loadedLeague);
       setDivisions(loadedDivisions);
       setTeams(loadedTeams);
       setMembers(loadedMembers);
-      setFixtures(
-        (fixturesResponse.data ??
-          []) as Fixture[],
-      );
-      setStandings(
-        (standingsResponse.data ??
-          []) as Standing[],
-      );
-      setResults(
-        (resultsResponse.data ??
-          []) as Result[],
-      );
-      setAdjustments(
-        (adjustmentResponse.data ??
-          []) as PointAdjustment[],
-      );
+      setTeamStaff(loadedStaff);
+      setFixtures(loadedFixtures);
+      setStandings(loadedStandings);
+      setResults(loadedResults);
+      setAdjustments(loadedAdjustments);
 
       const profileIds = [
         ...new Set(
@@ -558,10 +603,13 @@ function LeaguePanel() {
                   team.manager_id,
               )
               .filter(Boolean),
-            ...(
-              (adjustmentResponse.data ??
-                []) as PointAdjustment[]
-            )
+            ...loadedStaff
+              .map(
+                (staff) =>
+                  staff.user_id,
+              )
+              .filter(Boolean),
+            ...loadedAdjustments
               .map(
                 (adjustment) =>
                   adjustment.applied_by,
@@ -575,25 +623,33 @@ function LeaguePanel() {
       ];
 
       if (profileIds.length > 0) {
-        const { data: profileRows } =
-          await supabase
-            .from("profiles")
-            .select(
-              "id,username,display_name,discord_id",
-            )
-            .in("id", profileIds);
+        const {
+          data: profileRows,
+          error: profileError,
+        } = await supabase
+          .from("profiles")
+          .select(
+            "id,username,display_name,discord_id",
+          )
+          .in("id", profileIds);
 
-        const profileMap: Record<
+        if (profileError) {
+          throw new Error(
+            profileError.message,
+          );
+        }
+
+        const nextProfiles: Record<
           string,
           Profile
         > = {};
 
         for (const row of (profileRows ??
           []) as Profile[]) {
-          profileMap[row.id] = row;
+          nextProfiles[row.id] = row;
         }
 
-        setProfiles(profileMap);
+        setProfiles(nextProfiles);
       } else {
         setProfiles({});
       }
@@ -611,9 +667,154 @@ function LeaguePanel() {
     }
   }
 
-  async function createDivision() {
-    if (!league || !canManageLeague)
+  async function saveFixtureDeadline(
+    fixtureId: string,
+    deadline: string,
+  ) {
+    if (!canManageLeague) {
       return;
+    }
+
+    setSaving(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const deadlineValue = deadline
+        ? new Date(deadline).toISOString()
+        : null;
+
+      const { error: updateError } =
+        await supabase
+          .from("fixtures")
+          .update({
+            deadline_at: deadlineValue,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", fixtureId);
+
+      if (updateError) {
+        throw new Error(
+          updateError.message,
+        );
+      }
+
+      setSuccess(
+        "Fixture deadline updated.",
+      );
+
+      await loadPanel(false);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Couldn't update the fixture deadline.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function overrideFixture(
+    fixture: Fixture,
+  ) {
+    if (!canManageLeague) {
+      return;
+    }
+
+    if (
+      fixture.status === "completed"
+    ) {
+      setError(
+        "This fixture is already completed.",
+      );
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Complete ${teamName(fixture.home_team_id)} vs ${teamName(fixture.away_team_id)} as 0-0?`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const now =
+        new Date().toISOString();
+
+      const {
+        error: fixtureError,
+      } = await supabase
+        .from("fixtures")
+        .update({
+          home_score: 0,
+          away_score: 0,
+          status: "completed",
+          completion_source: "admin_override",
+          completion_note:
+            "Completed as 0-0 by an authorised League Panel user.",
+          completed_at: now,
+          updated_at: now,
+        })
+        .eq("id", fixture.id);
+
+      if (fixtureError) {
+        throw new Error(
+          fixtureError.message,
+        );
+      }
+
+      const { error: resultError } =
+        await supabase
+          .from("results")
+          .upsert(
+            {
+              fixture_id: fixture.id,
+              home_score: 0,
+              away_score: 0,
+              notes:
+                "Authorised League Panel 0-0 override.",
+              submitted_by: userId,
+              completed_at: now,
+            },
+            {
+              onConflict: "fixture_id",
+            },
+          );
+
+      if (resultError) {
+        throw new Error(
+          resultError.message,
+        );
+      }
+
+      setSuccess(
+        "Fixture completed as an authorised 0-0.",
+      );
+
+      setSelectedFixtureId(null);
+
+      await loadPanel(false);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Couldn't override the fixture.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function createDivision() {
+    if (!league || !canManageLeague) {
+      return;
+    }
 
     const name =
       newDivisionName.trim();
@@ -638,16 +839,16 @@ function LeaguePanel() {
             name,
             tier:
               Number(newDivisionTier) || 1,
-            season:
-              league.season,
+            season: league.season,
             status: "draft",
             gameweek_interval_days: 3,
           });
 
-      if (insertError)
+      if (insertError) {
         throw new Error(
           insertError.message,
         );
+      }
 
       setNewDivisionName("");
       setNewDivisionTier("1");
@@ -672,7 +873,9 @@ function LeaguePanel() {
     divisionId: string,
     pointsTier: Division["points_tier"],
   ) {
-    if (!isOwner) return;
+    if (!isOwner) {
+      return;
+    }
 
     setSaving(true);
     setError(null);
@@ -687,10 +890,11 @@ function LeaguePanel() {
           })
           .eq("id", divisionId);
 
-      if (updateError)
+      if (updateError) {
         throw new Error(
           updateError.message,
         );
+      }
 
       setSuccess(
         "Scoring tier updated.",
@@ -712,8 +916,9 @@ function LeaguePanel() {
     divisionId: string,
     status: string,
   ) {
-    if (!canManageLeague)
+    if (!canManageLeague) {
       return;
+    }
 
     setSaving(true);
     setError(null);
@@ -727,6 +932,12 @@ function LeaguePanel() {
         status,
       };
 
+      if (status === "active") {
+        update.start_date =
+          new Date().toISOString();
+        update.ended_at = null;
+      }
+
       if (status === "ended") {
         update.ended_at =
           new Date().toISOString();
@@ -738,10 +949,11 @@ function LeaguePanel() {
           .update(update)
           .eq("id", divisionId);
 
-      if (updateError)
+      if (updateError) {
         throw new Error(
           updateError.message,
         );
+      }
 
       setSuccess(
         status === "active"
@@ -764,8 +976,9 @@ function LeaguePanel() {
   }
 
   async function applyDeduction() {
-    if (!userId || !canManageLeague)
+    if (!userId || !canManageLeague) {
       return;
+    }
 
     if (
       !deductionDivisionId ||
@@ -815,15 +1028,15 @@ function LeaguePanel() {
               deductionTeamId,
             p_points_delta:
               amount,
-            p_reason:
-              reason,
+            p_reason: reason,
           },
         );
 
-      if (rpcError)
+      if (rpcError) {
         throw new Error(
           rpcError.message,
         );
+      }
 
       setDeductionAmount("");
       setDeductionReason("");
@@ -850,8 +1063,9 @@ function LeaguePanel() {
     if (
       !league ||
       !canManageLeague
-    )
+    ) {
       return;
+    }
 
     const query =
       newOverseerUsername.trim();
@@ -871,7 +1085,9 @@ function LeaguePanel() {
       const { data: profile } =
         await supabase
           .from("profiles")
-          .select("id,username,discord_id")
+          .select(
+            "id,username,display_name,discord_id",
+          )
           .or(
             `username.eq.${query},discord_id.eq.${query}`,
           )
@@ -898,10 +1114,11 @@ function LeaguePanel() {
             },
           );
 
-      if (insertError)
+      if (insertError) {
         throw new Error(
           insertError.message,
         );
+      }
 
       setNewOverseerUsername("");
 
@@ -924,8 +1141,9 @@ function LeaguePanel() {
   async function removeMember(
     memberId: string,
   ) {
-    if (!canManageLeague)
+    if (!canManageLeague) {
       return;
+    }
 
     setSaving(true);
     setError(null);
@@ -938,10 +1156,11 @@ function LeaguePanel() {
           .delete()
           .eq("id", memberId);
 
-      if (deleteError)
+      if (deleteError) {
         throw new Error(
           deleteError.message,
         );
+      }
 
       setSuccess(
         "League staff member removed.",
@@ -962,8 +1181,9 @@ function LeaguePanel() {
   function teamName(
     teamId: string | null,
   ) {
-    if (!teamId)
+    if (!teamId) {
       return "Unknown team";
+    }
 
     return (
       teamMap[teamId]?.name ??
@@ -974,8 +1194,9 @@ function LeaguePanel() {
   function divisionName(
     divisionId: string | null,
   ) {
-    if (!divisionId)
+    if (!divisionId) {
       return "Unknown division";
+    }
 
     return (
       divisionMap[divisionId]?.name ??
@@ -986,7 +1207,9 @@ function LeaguePanel() {
   function formatDate(
     value: string | null,
   ) {
-    if (!value) return "Not set";
+    if (!value) {
+      return "Not set";
+    }
 
     return new Intl.DateTimeFormat(
       "en-GB",
@@ -1000,19 +1223,41 @@ function LeaguePanel() {
     ).format(new Date(value));
   }
 
+  function toDateTimeLocal(
+    value: string | null,
+  ) {
+    if (!value) {
+      return "";
+    }
+
+    const date = new Date(value);
+
+    const pad = (number: number) =>
+      String(number).padStart(2, "0");
+
+    return `${date.getFullYear()}-${pad(
+      date.getMonth() + 1,
+    )}-${pad(
+      date.getDate(),
+    )}T${pad(
+      date.getHours(),
+    )}:${pad(
+      date.getMinutes(),
+    )}`;
+  }
+
   function getResult(
     fixtureId: string,
   ) {
     return results.find(
       (result) =>
-        result.fixture_id ===
-        fixtureId,
+        result.fixture_id === fixtureId,
     );
   }
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center bg-black text-white">
         <Loader2 className="size-7 animate-spin text-white/60" />
       </div>
     );
@@ -1020,12 +1265,14 @@ function LeaguePanel() {
 
   if (error && !league) {
     return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center px-6">
+      <div className="flex min-h-screen items-center justify-center bg-black px-6 text-white">
         <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-white/[0.03] p-7">
           <CircleAlert className="size-7 text-red-400" />
+
           <h1 className="mt-5 text-2xl font-bold">
             League Panel unavailable
           </h1>
+
           <p className="mt-2 text-sm text-white/50">
             {error}
           </p>
@@ -1034,7 +1281,9 @@ function LeaguePanel() {
     );
   }
 
-  if (!league) return null;
+  if (!league) {
+    return null;
+  }
 
   return (
     <div className="min-h-screen bg-black text-white">
@@ -1056,117 +1305,38 @@ function LeaguePanel() {
             </div>
 
             <nav className="space-y-1">
-              <NavButton
-                active={
-                  activeSection ===
-                  "overview"
-                }
-                onClick={() =>
-                  setActiveSection(
-                    "overview",
-                  )
-                }
-              >
-                Overview
-              </NavButton>
-
-              <NavButton
-                active={
-                  activeSection ===
-                  "fixtures"
-                }
-                onClick={() =>
-                  setActiveSection(
-                    "fixtures",
-                  )
-                }
-              >
-                Fixtures
-              </NavButton>
-
-              <NavButton
-                active={
-                  activeSection ===
-                  "results"
-                }
-                onClick={() =>
-                  setActiveSection(
-                    "results",
-                  )
-                }
-              >
-                Results
-              </NavButton>
-
-              <NavButton
-                active={
-                  activeSection ===
-                  "table"
-                }
-                onClick={() =>
-                  setActiveSection(
-                    "table",
-                  )
-                }
-              >
-                Table
-              </NavButton>
-
-              <NavButton
-                active={
-                  activeSection ===
-                  "teams"
-                }
-                onClick={() =>
-                  setActiveSection(
-                    "teams",
-                  )
-                }
-              >
-                Teams
-              </NavButton>
-
-              <NavButton
-                active={
-                  activeSection ===
-                  "divisions"
-                }
-                onClick={() =>
-                  setActiveSection(
-                    "divisions",
-                  )
-                }
-              >
-                Divisions
-              </NavButton>
-
-              <NavButton
-                active={
-                  activeSection ===
-                  "deductions"
-                }
-                onClick={() =>
-                  setActiveSection(
+              {(
+                [
+                  ["overview", "Overview"],
+                  ["fixtures", "Fixtures"],
+                  ["results", "Results"],
+                  ["table", "Table"],
+                  ["teams", "Teams"],
+                  ["divisions", "Divisions"],
+                  [
                     "deductions",
-                  )
-                }
-              >
-                Point Deductions
-              </NavButton>
-
-              <NavButton
-                active={
-                  activeSection ===
-                  "overseers"
-                }
-                onClick={() =>
-                  setActiveSection(
-                    "overseers",
-                  )
-                }
-              >
-                Overseers
-              </NavButton>
+                    "Point Deductions",
+                  ],
+                  ["overseers", "Overseers"],
+                ] as const
+              ).map(
+                ([section, label]) => (
+                  <NavButton
+                    key={section}
+                    active={
+                      activeSection ===
+                      section
+                    }
+                    onClick={() =>
+                      setActiveSection(
+                        section,
+                      )
+                    }
+                  >
+                    {label}
+                  </NavButton>
+                ),
+              )}
             </nav>
 
             <div className="mt-7 border-t border-white/10 pt-5">
@@ -1192,33 +1362,31 @@ function LeaguePanel() {
 
         <main className="min-w-0 flex-1">
           <header className="mb-6 flex flex-col gap-4 border-b border-white/10 pb-6 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <div className="flex items-center gap-3">
-                {league.logo_url ? (
-                  <img
-                    src={league.logo_url}
-                    alt=""
-                    className="size-11 rounded-xl object-contain bg-white/5"
-                  />
-                ) : (
-                  <div className="flex size-11 items-center justify-center rounded-xl bg-white/10">
-                    <Trophy className="size-5" />
-                  </div>
-                )}
-
-                <div>
-                  <h1 className="text-2xl font-bold">
-                    {league.name}
-                  </h1>
-
-                  <p className="text-sm text-white/40">
-                    {league.season ??
-                      "Current season"}{" "}
-                    ·{" "}
-                    {league.status ??
-                      "active"}
-                  </p>
+            <div className="flex items-center gap-3">
+              {league.logo_url ? (
+                <img
+                  src={league.logo_url}
+                  alt=""
+                  className="size-11 rounded-xl bg-white/5 object-contain"
+                />
+              ) : (
+                <div className="flex size-11 items-center justify-center rounded-xl bg-white/10">
+                  <Trophy className="size-5" />
                 </div>
+              )}
+
+              <div>
+                <h1 className="text-2xl font-bold">
+                  {league.name}
+                </h1>
+
+                <p className="text-sm text-white/40">
+                  {league.season ??
+                    "Current season"}{" "}
+                  ·{" "}
+                  {league.status ??
+                    "active"}
+                </p>
               </div>
             </div>
 
@@ -1259,14 +1427,14 @@ function LeaguePanel() {
                   void loadPanel(false)
                 }
                 disabled={refreshing}
-                className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm hover:bg-white/[0.08]"
+                className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm hover:bg-white/[0.08] disabled:opacity-50"
               >
                 <RefreshCw
-                  className={`size-4 ${
+                  className={
                     refreshing
-                      ? "animate-spin"
-                      : ""
-                  }`}
+                      ? "size-4 animate-spin"
+                      : "size-4"
+                  }
                 />
                 Refresh
               </button>
@@ -1276,6 +1444,7 @@ function LeaguePanel() {
           {error && (
             <div className="mb-5 flex items-start gap-3 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-200">
               <CircleAlert className="mt-0.5 size-4 shrink-0" />
+
               <span>{error}</span>
 
               <button
@@ -1321,7 +1490,6 @@ function LeaguePanel() {
               fixtures={
                 visibleFixtures
               }
-              divisions={divisions}
               teamName={teamName}
               divisionName={
                 divisionName
@@ -1334,6 +1502,19 @@ function LeaguePanel() {
                 setSelectedFixtureId
               }
               getResult={getResult}
+              canManageLeague={
+                canManageLeague
+              }
+              saving={saving}
+              saveFixtureDeadline={
+                saveFixtureDeadline
+              }
+              overrideFixture={
+                overrideFixture
+              }
+              toDateTimeLocal={
+                toDateTimeLocal
+              }
             />
           )}
 
@@ -1371,7 +1552,8 @@ function LeaguePanel() {
             <TeamsSection
               teams={teams}
               divisions={divisions}
-              profiles={profiles}
+              profiles={profileMap}
+              teamStaff={teamStaff}
             />
           )}
 
@@ -1487,7 +1669,7 @@ function NavButton({
   onClick,
 }: {
   active: boolean;
-  children: React.ReactNode;
+  children: ReactNode;
   onClick: () => void;
 }) {
   return (
@@ -1512,7 +1694,7 @@ function Card({
   children,
   className = "",
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   className?: string;
 }) {
   return (
@@ -1521,6 +1703,46 @@ function Card({
     >
       {children}
     </div>
+  );
+}
+
+function SectionHeading({
+  eyebrow,
+  title,
+  description,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div>
+      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-white/30">
+        {eyebrow}
+      </div>
+
+      <h2 className="mt-2 text-2xl font-bold">
+        {title}
+      </h2>
+
+      <p className="mt-1 max-w-2xl text-sm text-white/45">
+        {description}
+      </p>
+    </div>
+  );
+}
+
+function EmptyState({
+  text,
+}: {
+  text: string;
+}) {
+  return (
+    <Card className="p-8 text-center">
+      <div className="text-sm text-white/40">
+        {text}
+      </div>
+    </Card>
   );
 }
 
@@ -1536,10 +1758,52 @@ function StatCard({
       <div className="text-xs uppercase tracking-wider text-white/35">
         {label}
       </div>
+
       <div className="mt-2 text-3xl font-bold">
         {value}
       </div>
     </Card>
+  );
+}
+
+function StatusPill({
+  status,
+}: {
+  status: string;
+}) {
+  const completed =
+    status === "completed";
+
+  return (
+    <span
+      className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-medium ${
+        completed
+          ? "bg-emerald-500/10 text-emerald-300"
+          : "bg-white/10 text-white/55"
+      }`}
+    >
+      {status}
+    </span>
+  );
+}
+
+function InfoBox({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-xl bg-white/[0.03] p-4">
+      <div className="text-[10px] uppercase tracking-wider text-white/30">
+        {label}
+      </div>
+
+      <div className="mt-2 text-sm font-medium">
+        {value}
+      </div>
+    </div>
   );
 }
 
@@ -1565,27 +1829,21 @@ function Overview({
     string,
     Division
   >;
-  teamMap: Record<string, Team>;
+  teamMap: Record<
+    string,
+    Team
+  >;
 }) {
   const nextFixture =
     scheduledFixtures[0];
 
   return (
     <div className="space-y-6">
-      <div>
-        <div className="text-xs uppercase tracking-[0.18em] text-white/30">
-          Overview
-        </div>
-
-        <h2 className="mt-2 text-2xl font-bold">
-          {league.name}
-        </h2>
-
-        <p className="mt-1 max-w-2xl text-sm text-white/45">
-          Competition control centre for divisions,
-          fixtures, results and standings.
-        </p>
-      </div>
+      <SectionHeading
+        eyebrow="Overview"
+        title={league.name}
+        description="Competition control centre for divisions, fixtures, results and standings."
+      />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
@@ -1605,7 +1863,9 @@ function Overview({
 
         <StatCard
           label="Completed"
-          value={completedFixtures.length}
+          value={
+            completedFixtures.length
+          }
         />
       </div>
 
@@ -1627,7 +1887,8 @@ function Overview({
                   "?"}{" "}
                 ·{" "}
                 {divisionMap[
-                  nextFixture.division_id
+                  nextFixture.division_id ??
+                    ""
                 ]?.name ??
                   "Division"}
               </div>
@@ -1671,24 +1932,24 @@ function Overview({
                 )}
               </div>
 
-              {nextFixture.deadline_at && (
-                <div className="mt-2 text-xs text-white/30">
-                  Deadline:{" "}
-                  {new Intl.DateTimeFormat(
-                    "en-GB",
-                    {
-                      day: "2-digit",
-                      month: "short",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    },
-                  ).format(
-                    new Date(
-                      nextFixture.deadline_at,
-                    ),
-                  )}
-                </div>
-              )}
+              <div className="mt-2 text-xs text-white/30">
+                Deadline:{" "}
+                {nextFixture.deadline_at
+                  ? new Intl.DateTimeFormat(
+                      "en-GB",
+                      {
+                        day: "2-digit",
+                        month: "short",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      },
+                    ).format(
+                      new Date(
+                        nextFixture.deadline_at,
+                      ),
+                    )
+                  : "Not set"}
+              </div>
             </div>
           ) : (
             <div className="mt-6 rounded-xl bg-white/[0.03] p-5 text-sm text-white/40">
@@ -1702,7 +1963,7 @@ function Overview({
             <Trophy className="size-5" />
 
             <h3 className="font-semibold">
-              Current tables
+              Divisions
             </h3>
           </div>
 
@@ -1749,42 +2010,25 @@ function Overview({
           </div>
         </Card>
       </div>
-
-      <Card className="p-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="font-semibold">
-              Competition status
-            </h3>
-
-            <p className="mt-1 text-sm text-white/40">
-              {scheduledFixtures.length} scheduled ·{" "}
-              {completedFixtures.length} completed
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2 text-sm text-emerald-300">
-            <span className="size-2 rounded-full bg-emerald-400" />
-            NOVA engine connected
-          </div>
-        </div>
-      </Card>
     </div>
   );
 }
 
 function FixturesSection({
   fixtures,
-  divisions,
   teamName,
   divisionName,
   formatDate,
   selectedFixtureId,
   setSelectedFixtureId,
   getResult,
+  canManageLeague,
+  saving,
+  saveFixtureDeadline,
+  overrideFixture,
+  toDateTimeLocal,
 }: {
   fixtures: Fixture[];
-  divisions: Division[];
   teamName: (
     id: string | null,
   ) => string;
@@ -1801,17 +2045,36 @@ function FixturesSection({
   getResult: (
     id: string,
   ) => Result | undefined;
+  canManageLeague: boolean;
+  saving: boolean;
+  saveFixtureDeadline: (
+    id: string,
+    deadline: string,
+  ) => Promise<void>;
+  overrideFixture: (
+    fixture: Fixture,
+  ) => Promise<void>;
+  toDateTimeLocal: (
+    value: string | null,
+  ) => string;
 }) {
+  const selectedFixture =
+    fixtures.find(
+      (fixture) =>
+        fixture.id ===
+        selectedFixtureId,
+    ) ?? null;
+
   return (
     <div className="space-y-6">
       <SectionHeading
         eyebrow="Fixtures"
         title="Fixture schedule"
-        description="Upcoming matches, deadlines and completion state."
+        description="Manage generated fixtures, deadlines and authorised completion overrides."
       />
 
       {fixtures.length ===
-        0 ? (
+      0 ? (
         <EmptyState text="No fixtures have been generated for this league yet." />
       ) : (
         <Card className="overflow-hidden">
@@ -1928,94 +2191,131 @@ function FixturesSection({
         </Card>
       )}
 
-      {selectedFixtureId && (
+      {selectedFixture && (
         <Card className="p-6">
-          {(() => {
-            const fixture =
-              fixtures.find(
-                (item) =>
-                  item.id ===
-                  selectedFixtureId,
-              );
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="text-xs uppercase tracking-wider text-white/30">
+                Fixture control
+              </div>
 
-            if (!fixture)
-              return null;
+              <h3 className="mt-2 text-xl font-bold">
+                {teamName(
+                  selectedFixture.home_team_id,
+                )}{" "}
+                {selectedFixture.home_score ??
+                  getResult(
+                    selectedFixture.id,
+                  )?.home_score ??
+                  "—"}{" "}
+                <span className="text-white/20">
+                  -
+                </span>{" "}
+                {selectedFixture.away_score ??
+                  getResult(
+                    selectedFixture.id,
+                  )?.away_score ??
+                  "—"}{" "}
+                {teamName(
+                  selectedFixture.away_team_id,
+                )}
+              </h3>
+            </div>
 
-            const result =
-              getResult(
-                fixture.id,
-              );
+            <button
+              onClick={() =>
+                setSelectedFixtureId(
+                  null,
+                )
+              }
+              className="rounded-lg p-2 text-white/40 hover:bg-white/5 hover:text-white"
+            >
+              <X className="size-4" />
+            </button>
+          </div>
 
-            return (
-              <>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-xs uppercase tracking-wider text-white/30">
-                      Fixture details
-                    </div>
+          <div className="mt-6 grid gap-4 sm:grid-cols-3">
+            <InfoBox
+              label="Gameweek"
+              value={`GW ${selectedFixture.gameweek ?? "—"}`}
+            />
 
-                    <h3 className="mt-2 text-xl font-bold">
-                      {teamName(
-                        fixture.home_team_id,
-                      )}{" "}
-                      {fixture.home_score ??
-                        result?.home_score ??
-                        "—"}{" "}
-                      <span className="text-white/20">
-                        -
-                      </span>{" "}
-                      {fixture.away_score ??
-                        result?.away_score ??
-                        "—"}{" "}
-                      {teamName(
-                        fixture.away_team_id,
-                      )}
-                    </h3>
-                  </div>
+            <InfoBox
+              label="Completion"
+              value={
+                selectedFixture.completion_source ??
+                "scheduled"
+              }
+            />
+
+            <InfoBox
+              label="Completed"
+              value={formatDate(
+                selectedFixture.completed_at,
+              )}
+            />
+          </div>
+
+          {canManageLeague &&
+            selectedFixture.status !==
+              "completed" && (
+              <div className="mt-6 border-t border-white/10 pt-6">
+                <div className="flex items-center gap-2">
+                  <Clock className="size-4 text-white/50" />
+
+                  <h4 className="font-semibold">
+                    Deadline control
+                  </h4>
+                </div>
+
+                <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+                  <input
+                    type="datetime-local"
+                    defaultValue={toDateTimeLocal(
+                      selectedFixture.deadline_at,
+                    )}
+                    id={`deadline-${selectedFixture.id}`}
+                    className="flex-1 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm outline-none"
+                  />
 
                   <button
-                    onClick={() =>
-                      setSelectedFixtureId(
-                        null,
-                      )
-                    }
-                    className="rounded-lg p-2 text-white/40 hover:bg-white/5 hover:text-white"
+                    disabled={saving}
+                    onClick={() => {
+                      const input =
+                        document.getElementById(
+                          `deadline-${selectedFixture.id}`,
+                        ) as HTMLInputElement | null;
+
+                      void saveFixtureDeadline(
+                        selectedFixture.id,
+                        input?.value ?? "",
+                      );
+                    }}
+                    className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-black disabled:opacity-50"
                   >
-                    <X className="size-4" />
+                    Save deadline
                   </button>
                 </div>
 
-                <div className="mt-6 grid gap-4 sm:grid-cols-3">
-                  <InfoBox
-                    label="Gameweek"
-                    value={`GW ${fixture.gameweek ?? "—"}`}
-                  />
+                <button
+                  disabled={saving}
+                  onClick={() =>
+                    void overrideFixture(
+                      selectedFixture,
+                    )
+                  }
+                  className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 px-5 py-3 text-sm font-semibold text-red-300 hover:bg-red-500/15 disabled:opacity-50"
+                >
+                  Complete as authorised 0-0
+                </button>
+              </div>
+            )}
 
-                  <InfoBox
-                    label="Completion"
-                    value={
-                      fixture.completion_source ??
-                      "scheduled"
-                    }
-                  />
-
-                  <InfoBox
-                    label="Completed"
-                    value={formatDate(
-                      fixture.completed_at ??
-                        null,
-                    )}
-                  />
-                </div>
-
-                {fixture.completion_note && (
-                  <div className="mt-4 rounded-xl bg-white/[0.03] p-4 text-sm text-white/50">
-                    {fixture.completion_note}
-                  </div>
-                )}
-              </>
-            );
-          })()}
+          {selectedFixture.completion_note && (
+            <div className="mt-5 rounded-xl bg-white/[0.03] p-4 text-sm text-white/45">
+              {selectedFixture.completion_note}
+            </div>
+          )}
         </Card>
       )}
     </div>
@@ -2064,7 +2364,7 @@ function ResultsSection({
       />
 
       {fixtures.length ===
-        0 ? (
+      0 ? (
         <EmptyState text="No completed results yet." />
       ) : (
         <div className="space-y-3">
@@ -2127,8 +2427,15 @@ function ResultsSection({
                     </div>
                   </div>
 
+                  {result?.replay_code && (
+                    <div className="mt-4 border-t border-white/10 pt-4 text-xs text-white/35">
+                      Replay:{" "}
+                      {result.replay_code}
+                    </div>
+                  )}
+
                   {result?.notes && (
-                    <div className="mt-4 border-t border-white/10 pt-4 text-sm text-white/45">
+                    <div className="mt-3 text-sm text-white/45">
                       {result.notes}
                     </div>
                   )}
@@ -2159,8 +2466,9 @@ function TableSection({
       Team
     > = {};
 
-    for (const team of teams)
+    for (const team of teams) {
       map[team.id] = team;
+    }
 
     return map;
   }, [teams]);
@@ -2183,21 +2491,20 @@ function TableSection({
       return map;
     }, [adjustments]);
 
-  const divisionMap = useMemo(
-    () => {
+  const divisionMap =
+    useMemo(() => {
       const map: Record<
         string,
         Division
       > = {};
 
-      for (const division of divisions)
+      for (const division of divisions) {
         map[division.id] =
           division;
+      }
 
       return map;
-    },
-    [divisions],
-  );
+    }, [divisions]);
 
   const grouped = useMemo(() => {
     const map: Record<
@@ -2206,8 +2513,9 @@ function TableSection({
     > = {};
 
     for (const row of standings) {
-      if (!map[row.division_id])
+      if (!map[row.division_id]) {
         map[row.division_id] = [];
+      }
 
       map[row.division_id].push(
         row,
@@ -2382,7 +2690,9 @@ function TableSection({
                                   0
                                     ? "+"
                                     : ""}
-                                  {adjustment}
+                                  {
+                                    adjustment
+                                  }
                                   )
                                 </span>
                               )}
@@ -2411,6 +2721,7 @@ function TeamsSection({
   teams,
   divisions,
   profiles,
+  teamStaff,
 }: {
   teams: Team[];
   divisions: Division[];
@@ -2418,6 +2729,7 @@ function TeamsSection({
     string,
     Profile
   >;
+  teamStaff: TeamStaff[];
 }) {
   const divisionMap = useMemo(
     () => {
@@ -2426,9 +2738,10 @@ function TeamsSection({
         Division
       > = {};
 
-      for (const division of divisions)
+      for (const division of divisions) {
         map[division.id] =
           division;
+      }
 
       return map;
     },
@@ -2439,15 +2752,15 @@ function TeamsSection({
     <div className="space-y-6">
       <SectionHeading
         eyebrow="Teams"
-        title="Registered teams"
-        description="Teams currently connected to this league."
+        title="League teams"
+        description="Every registered team, its division, manager and co-managers."
       />
 
       {teams.length ===
-        0 ? (
-        <EmptyState text="No teams are connected to this league." />
+      0 ? (
+        <EmptyState text="No teams are registered in this league yet." />
       ) : (
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-4 lg:grid-cols-2">
           {teams.map((team) => {
             const manager =
               team.manager_id
@@ -2456,12 +2769,21 @@ function TeamsSection({
                   ]
                 : null;
 
+            const coManagers =
+              teamStaff.filter(
+                (staff) =>
+                  staff.team_id ===
+                    team.id &&
+                  staff.role ===
+                    "co_manager",
+              );
+
             return (
               <Card
                 key={team.id}
                 className="p-5"
               >
-                <div className="flex items-center gap-4">
+                <div className="flex items-start gap-4">
                   {team.logo_url ? (
                     <img
                       src={team.logo_url}
@@ -2469,48 +2791,82 @@ function TeamsSection({
                       className="size-12 rounded-xl bg-white/5 object-contain"
                     />
                   ) : (
-                    <div className="flex size-12 items-center justify-center rounded-xl bg-white/10 text-lg font-bold">
-                      {team.name
-                        .charAt(0)
-                        .toUpperCase()}
+                    <div className="flex size-12 items-center justify-center rounded-xl bg-white/10">
+                      <Users className="size-5" />
                     </div>
                   )}
 
-                  <div className="min-w-0">
-                    <div className="truncate font-semibold">
-                      {team.name}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="font-bold">
+                        {team.name}
+                      </h3>
+
+                      {team.short_name && (
+                        <span className="text-xs text-white/30">
+                          {team.short_name}
+                        </span>
+                      )}
                     </div>
 
                     <div className="mt-1 text-xs text-white/35">
-                      {team.short_name ??
-                        "No short name"}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-5 space-y-2 border-t border-white/10 pt-4 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-white/35">
-                      Division
-                    </span>
-                    <span>
                       {divisionMap[
                         team.division_id ??
                           ""
                       ]?.name ??
-                        "Unassigned"}
-                    </span>
+                        "Unassigned division"}
+                    </div>
                   </div>
+                </div>
 
-                  <div className="flex justify-between">
-                    <span className="text-white/35">
+                <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-xl bg-white/[0.03] p-4">
+                    <div className="text-[10px] uppercase tracking-wider text-white/30">
                       Manager
-                    </span>
-                    <span>
+                    </div>
+
+                    <div className="mt-2 text-sm font-medium">
                       {manager?.display_name ??
                         manager?.username ??
                         "Unassigned"}
-                    </span>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl bg-white/[0.03] p-4">
+                    <div className="text-[10px] uppercase tracking-wider text-white/30">
+                      Co-Managers
+                    </div>
+
+                    {coManagers.length >
+                    0 ? (
+                      <div className="mt-2 space-y-1">
+                        {coManagers.map(
+                          (staff) => {
+                            const profile =
+                              profiles[
+                                staff.user_id
+                              ];
+
+                            return (
+                              <div
+                                key={
+                                  staff.id
+                                }
+                                className="text-sm font-medium"
+                              >
+                                {profile?.display_name ??
+                                  profile?.username ??
+                                  "Unknown"}
+                              </div>
+                            );
+                          },
+                        )}
+                      </div>
+                    ) : (
+                      <div className="mt-2 text-sm text-white/35">
+                        None
+                      </div>
+                    )}
                   </div>
                 </div>
               </Card>
@@ -2548,35 +2904,28 @@ function DivisionsSection({
   setNewDivisionTier: (
     value: string,
   ) => void;
-  createDivision: () => void;
+  createDivision: () => Promise<void>;
   updateDivisionTier: (
-    divisionId: string,
+    id: string,
     tier: Division["points_tier"],
-  ) => void;
+  ) => Promise<void>;
   changeDivisionStatus: (
-    divisionId: string,
+    id: string,
     status: string,
-  ) => void;
+  ) => Promise<void>;
   saving: boolean;
 }) {
   return (
     <div className="space-y-6">
       <SectionHeading
         eyebrow="Divisions"
-        title="Competition structure"
-        description="Configure divisions and the player scoring tier attached to each one."
+        title="Division control"
+        description="Create divisions, start or end them, and configure NOVA Points scoring tiers."
       />
 
       {canManageLeague && (
-        <Card className="p-5">
-          <div className="mb-4 flex items-center gap-2">
-            <Plus className="size-4" />
-            <h3 className="font-semibold">
-              Create division
-            </h3>
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-[1fr_160px_auto]">
+        <Card className="p-6">
+          <div className="grid gap-3 md:grid-cols-[1fr_140px_auto]">
             <input
               value={newDivisionName}
               onChange={(event) =>
@@ -2603,12 +2952,14 @@ function DivisionsSection({
               >
                 Tier 1
               </option>
+
               <option
                 value="2"
                 className="bg-black"
               >
                 Tier 2
               </option>
+
               <option
                 value="3"
                 className="bg-black"
@@ -2618,8 +2969,8 @@ function DivisionsSection({
             </select>
 
             <button
-              onClick={
-                createDivision
+              onClick={() =>
+                void createDivision()
               }
               disabled={saving}
               className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-black disabled:opacity-50"
@@ -2647,7 +2998,7 @@ function DivisionsSection({
               >
                 <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
                   <div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex flex-wrap items-center gap-3">
                       <h3 className="text-lg font-bold">
                         {division.name}
                       </h3>
@@ -2700,8 +3051,7 @@ function DivisionsSection({
                         ) =>
                           void updateDivisionTier(
                             division.id,
-                            event
-                              .target
+                            event.target
                               .value as Division["points_tier"],
                           )
                         }
@@ -2746,8 +3096,7 @@ function DivisionsSection({
                           ) =>
                             void changeDivisionStatus(
                               division.id,
-                              event
-                                .target
+                              event.target
                                 .value,
                             )
                           }
@@ -2832,7 +3181,7 @@ function DeductionsSection({
   setDeductionReason: (
     value: string,
   ) => void;
-  applyDeduction: () => void;
+  applyDeduction: () => Promise<void>;
   canManageLeague: boolean;
   saving: boolean;
 }) {
@@ -2848,7 +3197,7 @@ function DeductionsSection({
       <SectionHeading
         eyebrow="Discipline"
         title="Table point adjustments"
-        description="Apply or restore table points with a permanent audit trail."
+        description="Apply or restore table points through the existing secure standings RPC."
       />
 
       {canManageLeague ? (
@@ -2867,9 +3216,7 @@ function DeductionsSection({
                   setDeductionDivisionId(
                     event.target.value,
                   );
-                  setDeductionTeamId(
-                    "",
-                  );
+                  setDeductionTeamId("");
                 }}
                 className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm outline-none"
               >
@@ -2975,8 +3322,8 @@ function DeductionsSection({
           </div>
 
           <button
-            onClick={
-              applyDeduction
+            onClick={() =>
+              void applyDeduction()
             }
             disabled={
               saving ||
@@ -3003,7 +3350,7 @@ function DeductionsSection({
         </div>
 
         {adjustments.length ===
-          0 ? (
+        0 ? (
           <div className="p-6 text-sm text-white/40">
             No point adjustments have been recorded.
           </div>
@@ -3039,7 +3386,9 @@ function DeductionsSection({
                       </div>
 
                       <div className="mt-1 text-sm text-white/40">
-                        {adjustment.reason}
+                        {
+                          adjustment.reason
+                        }
                       </div>
                     </div>
 
@@ -3058,7 +3407,8 @@ function DeductionsSection({
                           : ""}
                         {
                           adjustment.points_delta
-                        } pts
+                        }{" "}
+                        pts
                       </div>
 
                       <div className="mt-1 text-xs text-white/30">
@@ -3070,8 +3420,10 @@ function DeductionsSection({
                           "en-GB",
                           {
                             day: "2-digit",
-                            month: "short",
-                            year: "numeric",
+                            month:
+                              "short",
+                            year:
+                              "numeric",
                           },
                         ).format(
                           new Date(
@@ -3110,10 +3462,10 @@ function OverseersSection({
   setNewOverseerUsername: (
     value: string,
   ) => void;
-  addCoOverseer: () => void;
+  addCoOverseer: () => Promise<void>;
   removeMember: (
     id: string,
-  ) => void;
+  ) => Promise<void>;
   canManageLeague: boolean;
   saving: boolean;
 }) {
@@ -3142,8 +3494,8 @@ function OverseersSection({
             />
 
             <button
-              onClick={
-                addCoOverseer
+              onClick={() =>
+                void addCoOverseer()
               }
               disabled={saving}
               className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-black disabled:opacity-50"
@@ -3201,7 +3553,7 @@ function OverseersSection({
                         disabled={
                           saving
                         }
-                        className="rounded-lg border border-red-500/20 px-3 py-2 text-xs text-red-300 hover:bg-red-500/10"
+                        className="rounded-lg border border-red-500/20 px-3 py-2 text-xs text-red-300 hover:bg-red-500/10 disabled:opacity-50"
                       >
                         Remove
                       </button>
@@ -3218,109 +3570,5 @@ function OverseersSection({
         )}
       </div>
     </div>
-  );
-}
-
-function SectionHeading({
-  eyebrow,
-  title,
-  description,
-}: {
-  eyebrow: string;
-  title: string;
-  description: string;
-}) {
-  return (
-    <div>
-      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-white/30">
-        {eyebrow}
-      </div>
-
-      <h2 className="mt-2 text-2xl font-bold">
-        {title}
-      </h2>
-
-      <p className="mt-1 text-sm text-white/45">
-        {description}
-      </p>
-    </div>
-  );
-}
-
-function InfoBox({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="rounded-xl bg-white/[0.03] p-4">
-      <div className="text-[10px] uppercase tracking-wider text-white/25">
-        {label}
-      </div>
-
-      <div className="mt-2 text-sm font-medium">
-        {value}
-      </div>
-    </div>
-  );
-}
-
-function StatusPill({
-  status,
-}: {
-  status: string;
-}) {
-  const normalized =
-    status.toLowerCase();
-
-  let className =
-    "border-white/10 bg-white/5 text-white/50";
-
-  if (
-    normalized === "completed"
-  ) {
-    className =
-      "border-emerald-500/20 bg-emerald-500/10 text-emerald-300";
-  } else if (
-    normalized === "active"
-  ) {
-    className =
-      "border-blue-500/20 bg-blue-500/10 text-blue-300";
-  } else if (
-    normalized === "ended"
-  ) {
-    className =
-      "border-red-500/20 bg-red-500/10 text-red-300";
-  }
-
-  return (
-    <span
-      className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-medium capitalize ${className}`}
-    >
-      {status.replace(
-        /_/g,
-        " ",
-      )}
-    </span>
-  );
-}
-
-function EmptyState({
-  text,
-}: {
-  text: string;
-}) {
-  return (
-    <Card className="p-10 text-center">
-      <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-white/[0.05]">
-        <Users className="size-5 text-white/30" />
-      </div>
-
-      <p className="mt-4 text-sm text-white/40">
-        {text}
-      </p>
-    </Card>
   );
 }
