@@ -9,9 +9,9 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  User,
 } from "discord.js";
 import { supabase } from "./database.js";
+import { generateFixtures as generateFixtureSchedule } from "./fixtures.js";
 
 const token = process.env.DISCORD_BOT_TOKEN;
 const clientId = process.env.DISCORD_CLIENT_ID;
@@ -137,7 +137,9 @@ export async function handleButton(
 ========================= */
 
 function isAdmin(
-  interaction: ChatInputCommandInteraction,
+  interaction:
+    | ChatInputCommandInteraction
+    | ButtonInteraction,
 ) {
   return interaction.memberPermissions?.has(
     PermissionFlagsBits.Administrator,
@@ -168,6 +170,81 @@ function hasConfiguredRole(
 }
 
 /* =========================
+   NOVA LEAGUE STAFF
+========================= */
+
+async function isLeagueOverseer(
+  interaction:
+    | ChatInputCommandInteraction
+    | ButtonInteraction,
+  leagueId: string,
+) {
+  if (isAdmin(interaction)) {
+    return true;
+  }
+
+  const profile =
+    await getProfileByDiscordId(
+      interaction.user.id,
+    );
+
+  if (!profile) {
+    return false;
+  }
+
+  const { data: membership, error } =
+    await supabase
+      .from("league_members")
+      .select("role")
+      .eq("league_id", leagueId)
+      .eq("user_id", profile.id)
+      .maybeSingle();
+
+  if (error) {
+    console.error(
+      "League staff lookup error:",
+      error,
+    );
+
+    return false;
+  }
+
+  const role =
+    String(
+      membership?.role ?? "",
+    ).toLowerCase();
+
+  return (
+    role === "overseer" ||
+    role === "co_overseer" ||
+    role === "co-overseer"
+  );
+}
+
+async function requireLeagueOverseer(
+  interaction: ChatInputCommandInteraction,
+  leagueId: string,
+) {
+  const allowed =
+    await isLeagueOverseer(
+      interaction,
+      leagueId,
+    );
+
+  if (allowed) {
+    return true;
+  }
+
+  await interaction.reply({
+    content:
+      "❌ You need to be a NOVA Overseer or Co-Overseer to use this command.",
+    ephemeral: true,
+  });
+
+  return false;
+}
+
+/* =========================
    PROFILE HELPERS
 ========================= */
 
@@ -177,7 +254,9 @@ async function getProfileByDiscordId(
   const { data, error } =
     await supabase
       .from("profiles")
-      .select("id,username,display_name,discord_id")
+      .select(
+        "id,username,display_name,discord_id",
+      )
       .eq("discord_id", discordId)
       .maybeSingle();
 
@@ -215,10 +294,6 @@ async function getManagedTeam(
   profileId: string,
   leagueId: string,
 ) {
-  /*
-   * Primary manager
-   */
-
   const { data: managerTeam } =
     await supabase
       .from("teams")
@@ -232,10 +307,6 @@ async function getManagedTeam(
   if (managerTeam) {
     return managerTeam;
   }
-
-  /*
-   * Co-manager / team staff
-   */
 
   const { data: staffRows, error } =
     await supabase
@@ -321,7 +392,8 @@ async function addPlayerToTeam(
         player_id: playerId,
         role: "player",
         status: "active",
-        joined_at: new Date().toISOString(),
+        joined_at:
+          new Date().toISOString(),
         left_at: null,
       });
 
@@ -342,7 +414,8 @@ async function removePlayerFromTeam(
       .from("team_members")
       .update({
         status: "inactive",
-        left_at: new Date().toISOString(),
+        left_at:
+          new Date().toISOString(),
       })
       .eq("team_id", teamId)
       .eq("player_id", playerId)
@@ -433,9 +506,12 @@ async function setup(
     });
   }
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({
+    ephemeral: true,
+  });
 
-  const guildId = interaction.guildId;
+  const guildId =
+    interaction.guildId;
 
   if (!guildId) {
     return interaction.editReply(
@@ -443,10 +519,11 @@ async function setup(
     );
   }
 
-  const leagueName = interaction.options.getString(
-    "league",
-    true,
-  );
+  const leagueName =
+    interaction.options.getString(
+      "league",
+      true,
+    );
 
   const profile =
     await getProfileByDiscordId(
@@ -460,11 +537,19 @@ async function setup(
   }
 
   const divisionNames = [
-    interaction.options.getString("division1", true),
-    interaction.options.getString("division2"),
-    interaction.options.getString("division3"),
+    interaction.options.getString(
+      "division1",
+      true,
+    ),
+    interaction.options.getString(
+      "division2",
+    ),
+    interaction.options.getString(
+      "division3",
+    ),
   ].filter(
-    (value): value is string => Boolean(value),
+    (value): value is string =>
+      Boolean(value),
   );
 
   const slug = leagueName
@@ -483,7 +568,9 @@ async function setup(
     .maybeSingle();
 
   if (guildCheckError) {
-    console.error(guildCheckError);
+    console.error(
+      guildCheckError,
+    );
 
     return interaction.editReply(
       "❌ Couldn't check the server connection.",
@@ -502,11 +589,15 @@ async function setup(
   } = await supabase
     .from("leagues")
     .select("id")
-    .or(`name.ilike.${leagueName},slug.eq.${slug}`)
+    .or(
+      `name.ilike.${leagueName},slug.eq.${slug}`,
+    )
     .maybeSingle();
 
   if (leagueCheckError) {
-    console.error(leagueCheckError);
+    console.error(
+      leagueCheckError,
+    );
 
     return interaction.editReply(
       "❌ Couldn't check whether that league already exists.",
@@ -546,7 +637,8 @@ async function setup(
       .insert({
         guild_id: guildId,
         guild_name:
-          interaction.guild?.name ?? null,
+          interaction.guild?.name ??
+          null,
         league_id: league.id,
         updated_by_discord_id:
           interaction.user.id,
@@ -643,9 +735,12 @@ async function addTeam(
     });
   }
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({
+    ephemeral: true,
+  });
 
-  const guildId = interaction.guildId;
+  const guildId =
+    interaction.guildId;
 
   if (!guildId) {
     return interaction.editReply(
@@ -654,7 +749,10 @@ async function addTeam(
   }
 
   const teamRole =
-    interaction.options.getRole("team", true);
+    interaction.options.getRole(
+      "team",
+      true,
+    );
 
   const divisionName =
     interaction.options.getString(
@@ -663,7 +761,9 @@ async function addTeam(
     );
 
   const logo =
-    interaction.options.getAttachment("logo");
+    interaction.options.getAttachment(
+      "logo",
+    );
 
   const {
     data: settings,
@@ -674,12 +774,27 @@ async function addTeam(
     .eq("guild_id", guildId)
     .maybeSingle();
 
-  if (settingsError || !settings?.league_id) {
-    console.error(settingsError);
+  if (
+    settingsError ||
+    !settings?.league_id
+  ) {
+    console.error(
+      settingsError,
+    );
 
     return interaction.editReply(
       "❌ This server isn't connected to a league.",
     );
+  }
+
+  const allowed =
+    await requireLeagueOverseer(
+      interaction,
+      settings.league_id,
+    );
+
+  if (!allowed) {
+    return;
   }
 
   const {
@@ -688,12 +803,20 @@ async function addTeam(
   } = await supabase
     .from("divisions")
     .select("id,name,status")
-    .eq("league_id", settings.league_id)
-    .ilike("name", divisionName)
+    .eq(
+      "league_id",
+      settings.league_id,
+    )
+    .ilike(
+      "name",
+      divisionName,
+    )
     .maybeSingle();
 
   if (divisionError) {
-    console.error(divisionError);
+    console.error(
+      divisionError,
+    );
 
     return interaction.editReply(
       "❌ Couldn't find that division.",
@@ -706,13 +829,21 @@ async function addTeam(
     );
   }
 
-  const teamName = teamRole.name;
+  const teamName =
+    teamRole.name;
 
-  const teamSlug = teamName
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
+  const teamSlug =
+    teamName
+      .toLowerCase()
+      .trim()
+      .replace(
+        /[^a-z0-9]+/g,
+        "-",
+      )
+      .replace(
+        /^-+|-+$/g,
+        "",
+      );
 
   const {
     data: existingTeam,
@@ -720,14 +851,19 @@ async function addTeam(
   } = await supabase
     .from("teams")
     .select("id")
-    .eq("league_id", settings.league_id)
+    .eq(
+      "league_id",
+      settings.league_id,
+    )
     .or(
       `name.ilike.${teamName},slug.eq.${teamSlug},discord_role_id.eq.${teamRole.id}`,
     )
     .maybeSingle();
 
   if (existingTeamError) {
-    console.error(existingTeamError);
+    console.error(
+      existingTeamError,
+    );
 
     return interaction.editReply(
       "❌ Couldn't check whether that team already exists.",
@@ -746,11 +882,15 @@ async function addTeam(
       .insert({
         name: teamName,
         slug: teamSlug,
-        logo_url: logo?.url ?? null,
-        league_id: settings.league_id,
-        division_id: division.id,
+        logo_url:
+          logo?.url ?? null,
+        league_id:
+          settings.league_id,
+        division_id:
+          division.id,
         budget: 0,
-        discord_role_id: teamRole.id,
+        discord_role_id:
+          teamRole.id,
       });
 
   if (teamError) {
@@ -764,7 +904,9 @@ async function addTeam(
   return interaction.editReply(
     `✅ **${teamName}** has been added to **${divisionName}**!\n\n` +
       `🎭 Discord role: <@&${teamRole.id}>` +
-      (logo ? "\n🖼️ Logo saved." : ""),
+      (logo
+        ? "\n🖼️ Logo saved."
+        : ""),
   );
 }
 
@@ -783,9 +925,12 @@ async function makeDivision(
     });
   }
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({
+    ephemeral: true,
+  });
 
-  const guildId = interaction.guildId;
+  const guildId =
+    interaction.guildId;
 
   if (!guildId) {
     return interaction.editReply(
@@ -793,20 +938,24 @@ async function makeDivision(
     );
   }
 
-  const name = interaction.options.getString(
-    "division",
-    true,
-  );
+  const name =
+    interaction.options.getString(
+      "division",
+      true,
+    );
 
   const tier =
-    interaction.options.getInteger("tier") ?? 1;
+    interaction.options.getInteger(
+      "tier",
+    ) ?? 1;
 
-  const { data: settings } =
-    await supabase
-      .from("guild_settings")
-      .select("league_id")
-      .eq("guild_id", guildId)
-      .maybeSingle();
+  const {
+    data: settings,
+  } = await supabase
+    .from("guild_settings")
+    .select("league_id")
+    .eq("guild_id", guildId)
+    .maybeSingle();
 
   if (!settings?.league_id) {
     return interaction.editReply(
@@ -814,13 +963,30 @@ async function makeDivision(
     );
   }
 
-  const { data: existing } =
-    await supabase
-      .from("divisions")
-      .select("id")
-      .eq("league_id", settings.league_id)
-      .ilike("name", name)
-      .maybeSingle();
+  const allowed =
+    await requireLeagueOverseer(
+      interaction,
+      settings.league_id,
+    );
+
+  if (!allowed) {
+    return;
+  }
+
+  const {
+    data: existing,
+  } = await supabase
+    .from("divisions")
+    .select("id")
+    .eq(
+      "league_id",
+      settings.league_id,
+    )
+    .ilike(
+      "name",
+      name,
+    )
+    .maybeSingle();
 
   if (existing) {
     return interaction.editReply(
@@ -832,7 +998,8 @@ async function makeDivision(
     await supabase
       .from("divisions")
       .insert({
-        league_id: settings.league_id,
+        league_id:
+          settings.league_id,
         name,
         tier,
         status: "setup",
@@ -867,9 +1034,12 @@ async function startDivision(
     });
   }
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({
+    ephemeral: true,
+  });
 
-  const guildId = interaction.guildId;
+  const guildId =
+    interaction.guildId;
 
   if (!guildId) {
     return interaction.editReply(
@@ -877,17 +1047,19 @@ async function startDivision(
     );
   }
 
-  const name = interaction.options.getString(
-    "division",
-    true,
-  );
+  const name =
+    interaction.options.getString(
+      "division",
+      true,
+    );
 
-  const { data: settings } =
-    await supabase
-      .from("guild_settings")
-      .select("league_id")
-      .eq("guild_id", guildId)
-      .maybeSingle();
+  const {
+    data: settings,
+  } = await supabase
+    .from("guild_settings")
+    .select("league_id")
+    .eq("guild_id", guildId)
+    .maybeSingle();
 
   if (!settings?.league_id) {
     return interaction.editReply(
@@ -895,13 +1067,32 @@ async function startDivision(
     );
   }
 
-  const { data: division } =
-    await supabase
-      .from("divisions")
-      .select("id,name,status")
-      .eq("league_id", settings.league_id)
-      .ilike("name", name)
-      .maybeSingle();
+  const allowed =
+    await requireLeagueOverseer(
+      interaction,
+      settings.league_id,
+    );
+
+  if (!allowed) {
+    return;
+  }
+
+  const {
+    data: division,
+  } = await supabase
+    .from("divisions")
+    .select(
+      "id,name,status",
+    )
+    .eq(
+      "league_id",
+      settings.league_id,
+    )
+    .ilike(
+      "name",
+      name,
+    )
+    .maybeSingle();
 
   if (!division) {
     return interaction.editReply(
@@ -914,10 +1105,14 @@ async function startDivision(
       .from("divisions")
       .update({
         status: "active",
-        start_date: new Date().toISOString(),
+        start_date:
+          new Date().toISOString(),
         ended_at: null,
       })
-      .eq("id", division.id);
+      .eq(
+        "id",
+        division.id,
+      );
 
   if (error) {
     console.error(error);
@@ -947,9 +1142,12 @@ async function endDivision(
     });
   }
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({
+    ephemeral: true,
+  });
 
-  const guildId = interaction.guildId;
+  const guildId =
+    interaction.guildId;
 
   if (!guildId) {
     return interaction.editReply(
@@ -957,17 +1155,19 @@ async function endDivision(
     );
   }
 
-  const name = interaction.options.getString(
-    "division",
-    true,
-  );
+  const name =
+    interaction.options.getString(
+      "division",
+      true,
+    );
 
-  const { data: settings } =
-    await supabase
-      .from("guild_settings")
-      .select("league_id")
-      .eq("guild_id", guildId)
-      .maybeSingle();
+  const {
+    data: settings,
+  } = await supabase
+    .from("guild_settings")
+    .select("league_id")
+    .eq("guild_id", guildId)
+    .maybeSingle();
 
   if (!settings?.league_id) {
     return interaction.editReply(
@@ -975,13 +1175,32 @@ async function endDivision(
     );
   }
 
-  const { data: division } =
-    await supabase
-      .from("divisions")
-      .select("id,name")
-      .eq("league_id", settings.league_id)
-      .ilike("name", name)
-      .maybeSingle();
+  const allowed =
+    await requireLeagueOverseer(
+      interaction,
+      settings.league_id,
+    );
+
+  if (!allowed) {
+    return;
+  }
+
+  const {
+    data: division,
+  } = await supabase
+    .from("divisions")
+    .select(
+      "id,name",
+    )
+    .eq(
+      "league_id",
+      settings.league_id,
+    )
+    .ilike(
+      "name",
+      name,
+    )
+    .maybeSingle();
 
   if (!division) {
     return interaction.editReply(
@@ -994,9 +1213,13 @@ async function endDivision(
       .from("divisions")
       .update({
         status: "ended",
-        ended_at: new Date().toISOString(),
+        ended_at:
+          new Date().toISOString(),
       })
-      .eq("id", division.id);
+      .eq(
+        "id",
+        division.id,
+      );
 
   if (error) {
     console.error(error);
@@ -1018,46 +1241,46 @@ async function endDivision(
 async function generateFixtures(
   interaction: ChatInputCommandInteraction,
 ) {
-  if (!isAdmin(interaction)) {
+  if (!interaction.guildId) {
     return interaction.reply({
       content:
-        "❌ You need Administrator permission.",
+        "❌ Use this inside a server.",
       ephemeral: true,
     });
   }
 
-  await interaction.deferReply({ ephemeral: true });
-
-  const guildId = interaction.guildId;
-
-  if (!guildId) {
-    return interaction.editReply(
-      "❌ Use this inside a server.",
+  const settings =
+    await getGuildSettings(
+      interaction.guildId,
     );
+
+  if (!settings?.league_id) {
+    return interaction.reply({
+      content:
+        "❌ This server isn't connected to a league.",
+      ephemeral: true,
+    });
   }
+
+  const allowed =
+    await requireLeagueOverseer(
+      interaction,
+      settings.league_id,
+    );
+
+  if (!allowed) {
+    return;
+  }
+
+  await interaction.deferReply({
+    ephemeral: true,
+  });
 
   const divisionName =
     interaction.options.getString(
       "division",
       true,
     );
-
-  const {
-    data: settings,
-    error: settingsError,
-  } = await supabase
-    .from("guild_settings")
-    .select("league_id")
-    .eq("guild_id", guildId)
-    .maybeSingle();
-
-  if (settingsError || !settings?.league_id) {
-    console.error(settingsError);
-
-    return interaction.editReply(
-      "❌ This server isn't connected to a league.",
-    );
-  }
 
   const {
     data: division,
@@ -1067,12 +1290,20 @@ async function generateFixtures(
     .select(
       "id,name,status,start_date,gameweek_interval_days",
     )
-    .eq("league_id", settings.league_id)
-    .ilike("name", divisionName)
+    .eq(
+      "league_id",
+      settings.league_id,
+    )
+    .ilike(
+      "name",
+      divisionName,
+    )
     .maybeSingle();
 
   if (divisionError) {
-    console.error(divisionError);
+    console.error(
+      divisionError,
+    );
 
     return interaction.editReply(
       "❌ Couldn't find that division.",
@@ -1091,251 +1322,38 @@ async function generateFixtures(
     );
   }
 
-  const {
-    data: teams,
-    error: teamsError,
-  } = await supabase
-    .from("teams")
-    .select("id,name,division_id")
-    .eq("division_id", division.id)
-    .order("name");
-
-  if (teamsError) {
-    console.error(teamsError);
-
-    return interaction.editReply(
-      "❌ Couldn't load the teams.",
-    );
-  }
-
-  if (!teams || teams.length < 2) {
-    return interaction.editReply(
-      "❌ You need at least 2 teams in the division.",
-    );
-  }
-
-  const {
-    data: existingFixtures,
-    error: existingFixturesError,
-  } = await supabase
-    .from("fixtures")
-    .select("id")
-    .eq("division_id", division.id)
-    .limit(1);
-
-  if (existingFixturesError) {
-    console.error(existingFixturesError);
-
-    return interaction.editReply(
-      "❌ Couldn't check existing fixtures.",
-    );
-  }
-
-  if (
-    existingFixtures &&
-    existingFixtures.length > 0
-  ) {
-    return interaction.editReply(
-      `⚠️ Fixtures already exist for **${division.name}**.`,
-    );
-  }
-
-  let scheduleTeams = [...teams];
-
-  if (scheduleTeams.length % 2 !== 0) {
-    scheduleTeams.push({
-      id: null,
-      name: "BYE",
-      division_id: division.id,
-    });
-  }
-
-  const totalTeams = scheduleTeams.length;
-  const roundsPerLeg = totalTeams - 1;
-  const matchesPerRound = totalTeams / 2;
-
-  const rounds: {
-    home: typeof scheduleTeams[number];
-    away: typeof scheduleTeams[number];
-  }[][] = [];
-
-  let rotating = [...scheduleTeams];
-
-  for (
-    let round = 0;
-    round < roundsPerLeg;
-    round++
-  ) {
-    const matches: typeof rounds[number] = [];
-
-    for (
-      let i = 0;
-      i < matchesPerRound;
-      i++
-    ) {
-      const first = rotating[i];
-
-      const second =
-        rotating[totalTeams - 1 - i];
-
-      if (
-        first.id === null ||
-        second.id === null
-      ) {
-        continue;
-      }
-
-      const home =
-        round % 2 === 0
-          ? first
-          : second;
-
-      const away =
-        round % 2 === 0
-          ? second
-          : first;
-
-      matches.push({
-        home,
-        away,
-      });
-    }
-
-    rounds.push(matches);
-
-    rotating = [
-      rotating[0],
-      rotating[totalTeams - 1],
-      ...rotating.slice(
-        1,
-        totalTeams - 1,
-      ),
-    ];
-  }
-
-  const firstStart = division.start_date
-    ? new Date(division.start_date)
-    : new Date();
-
-  const intervalDays =
-    division.gameweek_interval_days || 3;
-
-  let fixtureCount = 0;
-
-  for (
-    let roundIndex = 0;
-    roundIndex < rounds.length * 2;
-    roundIndex++
-  ) {
-    const firstLeg =
-      roundIndex < rounds.length;
-
-    const sourceRound =
-      rounds[
-        firstLeg
-          ? roundIndex
-          : roundIndex - rounds.length
-      ];
-
-    const gameweekNumber =
-      roundIndex + 1;
-
-    const gameweekStart =
-      new Date(firstStart);
-
-    gameweekStart.setDate(
-      gameweekStart.getDate() +
-        roundIndex * intervalDays,
-    );
-
-    const {
-      data: gameweek,
-      error: gameweekError,
-    } = await supabase
-      .from("gameweeks")
-      .insert({
-        division_id: division.id,
-        number: gameweekNumber,
-        starts_at:
-          gameweekStart.toISOString(),
-      })
-      .select()
-      .single();
-
-    if (gameweekError || !gameweek) {
-      console.error(
-        `Gameweek ${gameweekNumber} error:`,
-        gameweekError,
+  try {
+    const result =
+      await generateFixtureSchedule(
+        division.id,
+        division.start_date
+          ? new Date(
+              division.start_date,
+            )
+          : new Date(),
       );
 
-      return interaction.editReply(
-        `❌ Couldn't create Gameweek ${gameweekNumber}.`,
-      );
-    }
+    return interaction.editReply(
+      `✅ Fixtures generated for **${result.divisionName}**!\n\n` +
+        `📅 Gameweeks: **${result.gameweekCount}**\n` +
+        `⚽ Fixtures: **${result.fixtureCount}**\n` +
+        `⏱️ Gameweek interval: **${result.intervalDays} days**\n\n` +
+        `🏠 Home & away fixtures have been created.`,
+    );
+  } catch (error) {
+    console.error(
+      "Fixture generation error:",
+      error,
+    );
 
-    for (
-      let matchIndex = 0;
-      matchIndex < sourceRound.length;
-      matchIndex++
-    ) {
-      const match =
-        sourceRound[matchIndex];
-
-      let homeTeam = match.home;
-      let awayTeam = match.away;
-
-      if (!firstLeg) {
-        homeTeam = match.away;
-        awayTeam = match.home;
-      }
-
-      const kickoff =
-        new Date(gameweekStart);
-
-      kickoff.setHours(
-        kickoff.getHours() +
-          matchIndex * 2,
-      );
-
-      const { error: fixtureError } =
-        await supabase
-          .from("fixtures")
-          .insert({
-            league_id: settings.league_id,
-            division_id: division.id,
-            home_team_id: homeTeam.id,
-            away_team_id: awayTeam.id,
-            kickoff_at:
-              kickoff.toISOString(),
-            status: "scheduled",
-            home_score: null,
-            away_score: null,
-            competition: "League",
-            gameweek: gameweekNumber,
-          });
-
-      if (fixtureError) {
-        console.error(
-          "Fixture creation error:",
-          fixtureError,
-        );
-
-        return interaction.editReply(
-          "❌ Couldn't create a fixture.",
-        );
-      }
-
-      fixtureCount++;
-    }
+    return interaction.editReply(
+      `❌ ${
+        error instanceof Error
+          ? error.message
+          : "Couldn't generate fixtures."
+      }`,
+    );
   }
-
-  return interaction.editReply(
-    `✅ Fixtures generated for **${division.name}**!\n\n` +
-      `📅 Gameweeks: **${rounds.length * 2}**\n` +
-      `⚽ Fixtures: **${fixtureCount}**\n` +
-      `⏱️ Gameweek interval: **${intervalDays} days**\n\n` +
-      `🏠 Home & away fixtures have been created.`,
-  );
 }
 
 /* =========================
@@ -1345,29 +1363,51 @@ async function generateFixtures(
 async function submitResult(
   interaction: ChatInputCommandInteraction,
 ) {
-  if (!isAdmin(interaction)) {
+  if (!interaction.guildId) {
     return interaction.reply({
       content:
-        "❌ You need Administrator permission.",
+        "❌ Use `/submitresult` inside a server.",
       ephemeral: true,
     });
+  }
+
+  const settings =
+    await getGuildSettings(
+      interaction.guildId,
+    );
+
+  if (!settings?.league_id) {
+    return interaction.reply({
+      content:
+        "❌ This server isn't connected to a NOVA league.",
+      ephemeral: true,
+    });
+  }
+
+  const allowed =
+    await requireLeagueOverseer(
+      interaction,
+      settings.league_id,
+    );
+
+  if (!allowed) {
+    return;
   }
 
   await interaction.deferReply({
     ephemeral: true,
   });
 
-  const guildId = interaction.guildId;
+  const guildId =
+    interaction.guildId;
 
-  if (!guildId) {
-    return interaction.editReply(
-      "❌ Use `/submitresult` inside a server.",
-    );
-  }
+  const channel =
+    interaction.channel;
 
-  const channel = interaction.channel;
-
-  if (!channel || !("messages" in channel)) {
+  if (
+    !channel ||
+    !("messages" in channel)
+  ) {
     return interaction.editReply(
       "❌ I couldn't access this channel.",
     );
@@ -1397,7 +1437,8 @@ async function submitResult(
         (message): message is Message =>
           !message.author.bot &&
           message.guildId === guildId &&
-          message.content.trim().length > 0,
+          message.content.trim()
+            .length > 0,
       )
       .sort(
         (a, b) =>
@@ -1405,31 +1446,46 @@ async function submitResult(
           a.createdTimestamp,
       );
 
-  let resultMessage: Message | null = null;
+  let resultMessage:
+    | Message
+    | null = null;
 
-  for (const message of candidateMessages) {
+  for (
+    const message of
+    candidateMessages
+  ) {
     const content =
       message.content.trim();
 
-    const scoreMatch = content.match(
-      /<@&(\d+)>\s+(\d+)\s*-\s*(\d+)\s+<@&(\d+)>/i,
-    );
+    const scoreMatch =
+      content.match(
+        /<@&(\d+)>\s+(\d+)\s*-\s*(\d+)\s+<@&(\d+)>/i,
+      );
 
     if (!scoreMatch) continue;
 
-    const hasReplaySection =
-      /^replay codes$/im.test(content);
-
-    if (!hasReplaySection) continue;
+    if (
+      !/^replay codes$/im.test(
+        content,
+      )
+    ) {
+      continue;
+    }
 
     const hasFirstHalf =
-      /^1ST HALF\s+\S+/im.test(content);
+      /^1ST HALF\s+\S+/im.test(
+        content,
+      );
 
     const hasSecondHalf =
-      /^2ND HALF\s+\S+/im.test(content);
+      /^2ND HALF\s+\S+/im.test(
+        content,
+      );
 
     const hasExtraTime =
-      /^EXTRA TIME\s+\S+/im.test(content);
+      /^EXTRA TIME\s+\S+/im.test(
+        content,
+      );
 
     if (
       !hasFirstHalf ||
@@ -1439,7 +1495,9 @@ async function submitResult(
       continue;
     }
 
-    resultMessage = message;
+    resultMessage =
+      message;
+
     break;
   }
 
@@ -1458,23 +1516,18 @@ async function submitResult(
   const content =
     resultMessage.content.trim();
 
-  const lines = content
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
+  const lines =
+    content
+      .split(/\r?\n/)
+      .map((line) =>
+        line.trim(),
+      )
+      .filter(Boolean);
 
-  const roleMentions =
-    [...resultMessage.mentions.roles.values()];
-
-  if (roleMentions.length < 2) {
-    return interaction.editReply(
-      "❌ The result message must mention both team roles.",
+  const scoreMatch =
+    content.match(
+      /<@&(\d+)>\s+(\d+)\s*-\s*(\d+)\s+<@&(\d+)>/i,
     );
-  }
-
-  const scoreMatch = content.match(
-    /<@&(\d+)>\s+(\d+)\s*-\s*(\d+)\s+<@&(\d+)>/i,
-  );
 
   if (!scoreMatch) {
     return interaction.editReply(
@@ -1482,34 +1535,24 @@ async function submitResult(
     );
   }
 
-  const homeRoleId = scoreMatch[1];
-  const homeScore = Number(scoreMatch[2]);
-  const awayScore = Number(scoreMatch[3]);
-  const awayRoleId = scoreMatch[4];
+  const homeRoleId =
+    scoreMatch[1];
 
-  if (homeRoleId === awayRoleId) {
-    return interaction.editReply(
-      "❌ The home and away teams can't be the same.",
-    );
-  }
+  const homeScore =
+    Number(scoreMatch[2]);
 
-  const {
-    data: settings,
-    error: settingsError,
-  } = await supabase
-    .from("guild_settings")
-    .select("league_id")
-    .eq("guild_id", guildId)
-    .maybeSingle();
+  const awayScore =
+    Number(scoreMatch[3]);
+
+  const awayRoleId =
+    scoreMatch[4];
 
   if (
-    settingsError ||
-    !settings?.league_id
+    homeRoleId ===
+    awayRoleId
   ) {
-    console.error(settingsError);
-
     return interaction.editReply(
-      "❌ This server isn't connected to a league.",
+      "❌ The home and away teams can't be the same.",
     );
   }
 
@@ -1521,8 +1564,14 @@ async function submitResult(
     .select(
       "id,name,division_id,discord_role_id",
     )
-    .eq("league_id", settings.league_id)
-    .eq("discord_role_id", homeRoleId)
+    .eq(
+      "league_id",
+      settings.league_id,
+    )
+    .eq(
+      "discord_role_id",
+      homeRoleId,
+    )
     .maybeSingle();
 
   const {
@@ -1533,11 +1582,20 @@ async function submitResult(
     .select(
       "id,name,division_id,discord_role_id",
     )
-    .eq("league_id", settings.league_id)
-    .eq("discord_role_id", awayRoleId)
+    .eq(
+      "league_id",
+      settings.league_id,
+    )
+    .eq(
+      "discord_role_id",
+      awayRoleId,
+    )
     .maybeSingle();
 
-  if (homeError || awayError) {
+  if (
+    homeError ||
+    awayError
+  ) {
     console.error(
       homeError,
       awayError,
@@ -1575,31 +1633,106 @@ async function submitResult(
   } = await supabase
     .from("fixtures")
     .select(
-      "id,home_team_id,away_team_id,status,gameweek,kickoff_at",
+      "id,home_team_id,away_team_id,status,gameweek,kickoff_at,deadline_at,completed_at,completion_source",
     )
-    .eq("league_id", settings.league_id)
-    .eq("division_id", homeTeam.division_id)
-    .eq("home_team_id", homeTeam.id)
-    .eq("away_team_id", awayTeam.id)
-    .eq("status", "scheduled")
-    .order("kickoff_at", {
-      ascending: true,
-    })
-    .limit(1);
+    .eq(
+      "league_id",
+      settings.league_id,
+    )
+    .eq(
+      "division_id",
+      homeTeam.division_id,
+    )
+    .eq(
+      "home_team_id",
+      homeTeam.id,
+    )
+    .eq(
+      "away_team_id",
+      awayTeam.id,
+    )
+    .order(
+      "kickoff_at",
+      {
+        ascending: true,
+      },
+    )
+    .limit(5);
 
   if (fixtureError) {
-    console.error(fixtureError);
+    console.error(
+      fixtureError,
+    );
 
     return interaction.editReply(
       "❌ Couldn't find the fixture.",
     );
   }
 
-  const fixture = fixtures?.[0];
+  const fixture =
+    fixtures?.find(
+      (candidate) =>
+        candidate.status ===
+        "scheduled",
+    );
 
   if (!fixture) {
+    const completed =
+      fixtures?.find(
+        (candidate) =>
+          candidate.status ===
+          "completed",
+      );
+
+    if (completed) {
+      return interaction.editReply(
+        "❌ This fixture has already been completed and is locked.",
+      );
+    }
+
     return interaction.editReply(
       `❌ No scheduled fixture found for **${homeTeam.name} vs ${awayTeam.name}**.`,
+    );
+  }
+
+  if (
+    fixture.deadline_at &&
+    new Date(
+      fixture.deadline_at,
+    ).getTime() <=
+      Date.now()
+  ) {
+    return interaction.editReply(
+      "❌ This fixture has passed its deadline and is no longer available for normal result submission.",
+    );
+  }
+
+  const {
+    data: existingResult,
+    error: existingResultError,
+  } =
+    await supabase
+      .from("results")
+      .select("id")
+      .eq(
+        "fixture_id",
+        fixture.id,
+      )
+      .maybeSingle();
+
+  if (existingResultError) {
+    console.error(
+      existingResultError,
+    );
+
+    return interaction.editReply(
+      "❌ Couldn't check whether this fixture already has a result.",
+    );
+  }
+
+  if (existingResult) {
+    return interaction.editReply(
+      "❌ This fixture already has a result recorded.",
     );
   }
 
@@ -1625,39 +1758,66 @@ async function submitResult(
     i < lines.length;
     i++
   ) {
-    const line = lines[i];
-    const lower = line.toLowerCase();
+    const line =
+      lines[i];
 
-    if (lower === "cleansheet") {
-      section = "cleansheet";
-      currentTeamId = null;
+    const lower =
+      line.toLowerCase();
+
+    if (
+      lower ===
+      "cleansheet"
+    ) {
+      section =
+        "cleansheet";
+      currentTeamId =
+        null;
       continue;
     }
 
-    if (lower === "replay codes") {
-      section = "replays";
-      currentTeamId = null;
+    if (
+      lower ===
+      "replay codes"
+    ) {
+      section =
+        "replays";
+      currentTeamId =
+        null;
       continue;
     }
 
-    if (section === "replays") {
+    if (
+      section ===
+      "replays"
+    ) {
       continue;
     }
 
     const roleMatch =
-      line.match(/^<@&(\d+)>$/);
+      line.match(
+        /^<@&(\d+)>$/,
+      );
 
     if (roleMatch) {
-      const roleId = roleMatch[1];
+      const roleId =
+        roleMatch[1];
 
-      if (roleId === homeRoleId) {
-        currentTeamId = homeTeam.id;
+      if (
+        roleId ===
+        homeRoleId
+      ) {
+        currentTeamId =
+          homeTeam.id;
         section = "ga";
         continue;
       }
 
-      if (roleId === awayRoleId) {
-        currentTeamId = awayTeam.id;
+      if (
+        roleId ===
+        awayRoleId
+      ) {
+        currentTeamId =
+          awayTeam.id;
         section = "ga";
         continue;
       }
@@ -1705,7 +1865,9 @@ async function submitResult(
         .replace("🌟", "")
         .trim();
 
-    if (!playerName) continue;
+    if (!playerName) {
+      continue;
+    }
 
     const discordMention =
       playerName.match(
@@ -1715,10 +1877,18 @@ async function submitResult(
     let player:
       | {
           id: string;
-          username: string | null;
-          display_name: string | null;
-          team_id: string | null;
-          discord_id: string | null;
+          username:
+            | string
+            | null;
+          display_name:
+            | string
+            | null;
+          team_id:
+            | string
+            | null;
+          discord_id:
+            | string
+            | null;
         }
       | null = null;
 
@@ -1745,7 +1915,8 @@ async function submitResult(
         );
       }
 
-      player = data;
+      player =
+        data;
     } else {
       const {
         data,
@@ -1768,7 +1939,8 @@ async function submitResult(
         );
       }
 
-      player = data;
+      player =
+        data;
     }
 
     if (!player) {
@@ -1779,7 +1951,8 @@ async function submitResult(
 
     if (
       player.team_id &&
-      player.team_id !== currentTeamId
+      player.team_id !==
+        currentTeamId
     ) {
       return interaction.editReply(
         `❌ **${playerName}** isn't registered to the team they're listed under.`,
@@ -1794,47 +1967,60 @@ async function submitResult(
       | "motm";
 
     if (isGoal) {
-      eventType = "goal";
+      eventType =
+        "goal";
     } else if (isAssist) {
-      eventType = "assist";
+      eventType =
+        "assist";
     } else if (isDefCS) {
-      eventType = "clean_sheet";
+      eventType =
+        "clean_sheet";
     } else if (isGKCS) {
       eventType =
         "clean_sheet_keeper";
     } else {
-      eventType = "motm";
+      eventType =
+        "motm";
     }
 
     events.push({
-      fixture_id: fixture.id,
-      player_id: player.id,
-      team_id: currentTeamId,
-      event_type: eventType,
+      fixture_id:
+        fixture.id,
+      player_id:
+        player.id,
+      team_id:
+        currentTeamId,
+      event_type:
+        eventType,
     });
   }
 
   const goalEvents =
     events.filter(
       (event) =>
-        event.event_type === "goal",
+        event.event_type ===
+        "goal",
     );
 
   const homeGoals =
     goalEvents.filter(
       (event) =>
-        event.team_id === homeTeam.id,
+        event.team_id ===
+        homeTeam.id,
     ).length;
 
   const awayGoals =
     goalEvents.filter(
       (event) =>
-        event.team_id === awayTeam.id,
+        event.team_id ===
+        awayTeam.id,
     ).length;
 
   if (
-    homeGoals !== homeScore ||
-    awayGoals !== awayScore
+    homeGoals !==
+      homeScore ||
+    awayGoals !==
+      awayScore
   ) {
     return interaction.editReply(
       `❌ Goal mismatch.\n\n` +
@@ -1855,8 +2041,14 @@ async function submitResult(
     | string
     | null = null;
 
-  for (const line of lines) {
-    if (/^1ST HALF\s+/i.test(line)) {
+  for (
+    const line of lines
+  ) {
+    if (
+      /^1ST HALF\s+/i.test(
+        line,
+      )
+    ) {
       replay1stHalf =
         line
           .replace(
@@ -1866,7 +2058,11 @@ async function submitResult(
           .trim();
     }
 
-    if (/^2ND HALF\s+/i.test(line)) {
+    if (
+      /^2ND HALF\s+/i.test(
+        line,
+      )
+    ) {
       replay2ndHalf =
         line
           .replace(
@@ -1876,7 +2072,11 @@ async function submitResult(
           .trim();
     }
 
-    if (/^EXTRA TIME\s+/i.test(line)) {
+    if (
+      /^EXTRA TIME\s+/i.test(
+        line,
+      )
+    ) {
       replayExtraTime =
         line
           .replace(
@@ -1900,67 +2100,68 @@ async function submitResult(
     );
   }
 
-  const {
-    error: updateError,
-  } = await supabase
-    .from("fixtures")
-    .update({
-      home_score: homeScore,
-      away_score: awayScore,
-      status: "completed",
-    })
-    .eq("id", fixture.id);
-
-  if (updateError) {
-    console.error(
-      "Fixture update error:",
-      updateError,
+  const submitter =
+    await getProfileByDiscordId(
+      interaction.user.id,
     );
 
+  if (!submitter) {
     return interaction.editReply(
-      "❌ Couldn't save the result.",
+      "❌ Your Discord account isn't linked to NOVA.",
     );
   }
 
+  /*
+   * Save the result first.
+   *
+   * The fixture remains scheduled until
+   * the result has successfully been
+   * recorded.
+   */
   const {
+    data: result,
     error: resultError,
-  } = await supabase
-    .from("results")
-    .insert({
-      fixture_id: fixture.id,
-      home_score: homeScore,
-      away_score: awayScore,
-      replay_code:
-        `1ST HALF ${replay1stHalf}\n` +
-        `2ND HALF ${replay2ndHalf}\n` +
-        `EXTRA TIME ${replayExtraTime}`,
-      submitted_by: null,
-      completed_at:
-        new Date().toISOString(),
-      recorded_at:
-        new Date().toISOString(),
-    });
+  } =
+    await supabase
+      .from("results")
+      .insert({
+        fixture_id:
+          fixture.id,
+        home_score:
+          homeScore,
+        away_score:
+          awayScore,
+        replay_code:
+          `1ST HALF ${replay1stHalf}\n` +
+          `2ND HALF ${replay2ndHalf}\n` +
+          `EXTRA TIME ${replayExtraTime}`,
+        submitted_by:
+          submitter.id,
+        completed_at:
+          new Date().toISOString(),
+        recorded_at:
+          new Date().toISOString(),
+      })
+      .select("id")
+      .single();
 
-  if (resultError) {
+  if (
+    resultError ||
+    !result
+  ) {
     console.error(
       "Result insert error:",
       resultError,
     );
 
-    await supabase
-      .from("fixtures")
-      .update({
-        home_score: null,
-        away_score: null,
-        status: "scheduled",
-      })
-      .eq("id", fixture.id);
-
     return interaction.editReply(
       "❌ Couldn't save the result.",
     );
   }
 
+  /*
+   * Save player events.
+   */
   if (events.length > 0) {
     const {
       error: eventsError,
@@ -1975,23 +2176,75 @@ async function submitResult(
       );
 
       await supabase
-        .from("fixtures")
-        .update({
-          home_score: null,
-          away_score: null,
-          status: "scheduled",
-        })
-        .eq("id", fixture.id);
-
-      await supabase
         .from("results")
         .delete()
-        .eq("fixture_id", fixture.id);
+        .eq(
+          "id",
+          result.id,
+        );
 
       return interaction.editReply(
         "❌ Result couldn't be saved because the player events failed.",
       );
     }
+  }
+
+  /*
+   * Complete the fixture only after
+   * the result and events are safely saved.
+   */
+  const {
+    error: updateError,
+  } = await supabase
+    .from("fixtures")
+    .update({
+      home_score:
+        homeScore,
+      away_score:
+        awayScore,
+      status:
+        "completed",
+      completed_at:
+        new Date().toISOString(),
+      completion_source:
+        "manual",
+      completion_note:
+        `Submitted by ${interaction.user.tag}.`,
+    })
+    .eq(
+      "id",
+      fixture.id,
+    )
+    .eq(
+      "status",
+      "scheduled",
+    );
+
+  if (updateError) {
+    console.error(
+      "Fixture update error:",
+      updateError,
+    );
+
+    await supabase
+      .from("match_events")
+      .delete()
+      .eq(
+        "fixture_id",
+        fixture.id,
+      );
+
+    await supabase
+      .from("results")
+      .delete()
+      .eq(
+        "id",
+        result.id,
+      );
+
+    return interaction.editReply(
+      "❌ Couldn't lock the fixture as completed.",
+    );
   }
 
   return interaction.editReply(
@@ -2001,25 +2254,29 @@ async function submitResult(
       `🅰️ Assists: **${
         events.filter(
           (event) =>
-            event.event_type === "assist",
+            event.event_type ===
+            "assist",
         ).length
       }**\n` +
       `🧱 DEF CS: **${
         events.filter(
           (event) =>
-            event.event_type === "clean_sheet",
+            event.event_type ===
+            "clean_sheet",
         ).length
       }**\n` +
       `🧤 GK CS: **${
         events.filter(
           (event) =>
-            event.event_type === "clean_sheet_keeper",
+            event.event_type ===
+            "clean_sheet_keeper",
         ).length
       }**\n` +
       `🌟 MOTM: **${
         events.filter(
           (event) =>
-            event.event_type === "motm",
+            event.event_type ===
+            "motm",
         ).length
       }**\n` +
       `🎥 Replay codes: **3/3**`,
@@ -2054,20 +2311,14 @@ async function signPlayer(
     });
   }
 
-  const managerRole =
-    settings.manager_role_id;
-
-  const coManagerRole =
-    settings.co_manager_role_id;
-
   if (
     !hasConfiguredRole(
       interaction,
-      managerRole,
+      settings.manager_role_id,
     ) &&
     !hasConfiguredRole(
       interaction,
-      coManagerRole,
+      settings.co_manager_role_id,
     )
   ) {
     return interaction.reply({
@@ -2110,17 +2361,18 @@ async function signPlayer(
       true,
     );
 
-  const { data: player } =
-    await supabase
-      .from("players")
-      .select(
-        "id,username,display_name,discord_id,team_id,loan_team_id",
-      )
-      .eq(
-        "discord_id",
-        playerUser.id,
-      )
-      .maybeSingle();
+  const {
+    data: player,
+  } = await supabase
+    .from("players")
+    .select(
+      "id,username,display_name,discord_id,team_id,loan_team_id",
+    )
+    .eq(
+      "discord_id",
+      playerUser.id,
+    )
+    .maybeSingle();
 
   if (!player) {
     return interaction.reply({
@@ -2153,11 +2405,19 @@ async function signPlayer(
         team_id: team.id,
         loan_team_id: null,
       })
-      .eq("id", player.id)
-      .is("team_id", null);
+      .eq(
+        "id",
+        player.id,
+      )
+      .is(
+        "team_id",
+        null,
+      );
 
   if (playerError) {
-    console.error(playerError);
+    console.error(
+      playerError,
+    );
 
     return interaction.reply({
       content:
@@ -2178,7 +2438,10 @@ async function signPlayer(
       .update({
         team_id: null,
       })
-      .eq("id", player.id);
+      .eq(
+        "id",
+        player.id,
+      );
 
     return interaction.reply({
       content:
@@ -2187,20 +2450,27 @@ async function signPlayer(
     });
   }
 
-  const { error: signingError } =
-    await supabase
-      .from("signings")
-      .insert({
-        player_id: player.id,
-        team_id: team.id,
-        previous_team_id: null,
-        signed_by: profile.id,
-        details:
-          "Signed via NOVA Discord bot.",
-      });
+  const {
+    error: signingError,
+  } = await supabase
+    .from("signings")
+    .insert({
+      player_id:
+        player.id,
+      team_id:
+        team.id,
+      previous_team_id:
+        null,
+      signed_by:
+        profile.id,
+      details:
+        "Signed via NOVA Discord bot.",
+    });
 
   if (signingError) {
-    console.error(signingError);
+    console.error(
+      signingError,
+    );
   }
 
   return interaction.reply({
@@ -2288,17 +2558,18 @@ async function releasePlayer(
       true,
     );
 
-  const { data: player } =
-    await supabase
-      .from("players")
-      .select(
-        "id,username,display_name,discord_id,team_id,loan_team_id",
-      )
-      .eq(
-        "discord_id",
-        playerUser.id,
-      )
-      .maybeSingle();
+  const {
+    data: player,
+  } = await supabase
+    .from("players")
+    .select(
+      "id,username,display_name,discord_id,team_id,loan_team_id",
+    )
+    .eq(
+      "discord_id",
+      playerUser.id,
+    )
+    .maybeSingle();
 
   if (!player) {
     return interaction.reply({
@@ -2308,7 +2579,10 @@ async function releasePlayer(
     });
   }
 
-  if (player.team_id !== team.id) {
+  if (
+    player.team_id !==
+    team.id
+  ) {
     return interaction.reply({
       content:
         `❌ **${player.display_name ?? player.username}** isn't registered to **${team.name}**.`,
@@ -2323,8 +2597,14 @@ async function releasePlayer(
         team_id: null,
         loan_team_id: null,
       })
-      .eq("id", player.id)
-      .eq("team_id", team.id);
+      .eq(
+        "id",
+        player.id,
+      )
+      .eq(
+        "team_id",
+        team.id,
+      );
 
   if (error) {
     console.error(error);
@@ -2341,20 +2621,27 @@ async function releasePlayer(
     team.id,
   );
 
-  const { error: signingError } =
-    await supabase
-      .from("signings")
-      .insert({
-        player_id: player.id,
-        team_id: team.id,
-        previous_team_id: team.id,
-        signed_by: profile.id,
-        details:
-          "Player released via NOVA Discord bot.",
-      });
+  const {
+    error: signingError,
+  } = await supabase
+    .from("signings")
+    .insert({
+      player_id:
+        player.id,
+      team_id:
+        team.id,
+      previous_team_id:
+        team.id,
+      signed_by:
+        profile.id,
+      details:
+        "Player released via NOVA Discord bot.",
+    });
 
   if (signingError) {
-    console.error(signingError);
+    console.error(
+      signingError,
+    );
   }
 
   return interaction.reply({
@@ -2391,17 +2678,18 @@ async function requestRelease(
     });
   }
 
-  const { data: player } =
-    await supabase
-      .from("players")
-      .select(
-        "id,username,display_name,team_id,loan_team_id",
-      )
-      .eq(
-        "discord_id",
-        interaction.user.id,
-      )
-      .maybeSingle();
+  const {
+    data: player,
+  } = await supabase
+    .from("players")
+    .select(
+      "id,username,display_name,team_id,loan_team_id",
+    )
+    .eq(
+      "discord_id",
+      interaction.user.id,
+    )
+    .maybeSingle();
 
   if (!player) {
     return interaction.reply({
@@ -2436,10 +2724,21 @@ async function requestRelease(
     data: existing,
   } = await supabase
     .from("release_requests")
-    .select("id,status")
-    .eq("player_id", player.id)
-    .eq("team_id", player.team_id)
-    .eq("status", "pending")
+    .select(
+      "id,status",
+    )
+    .eq(
+      "player_id",
+      player.id,
+    )
+    .eq(
+      "team_id",
+      player.team_id,
+    )
+    .eq(
+      "status",
+      "pending",
+    )
     .maybeSingle();
 
   if (existing) {
@@ -2456,16 +2755,24 @@ async function requestRelease(
   } = await supabase
     .from("release_requests")
     .insert({
-      player_id: player.id,
-      team_id: player.team_id,
-      requested_by: profile.id,
-      reason: reason ?? null,
-      status: "pending",
+      player_id:
+        player.id,
+      team_id:
+        player.team_id,
+      requested_by:
+        profile.id,
+      reason:
+        reason ?? null,
+      status:
+        "pending",
     })
     .select()
     .single();
 
-  if (error || !request) {
+  if (
+    error ||
+    !request
+  ) {
     console.error(error);
 
     return interaction.reply({
@@ -2487,20 +2794,29 @@ async function requestRelease(
           .setCustomId(
             `release:accept:${request.id}`,
           )
-          .setLabel("Accept Release")
-          .setStyle(ButtonStyle.Success),
+          .setLabel(
+            "Accept Release",
+          )
+          .setStyle(
+            ButtonStyle.Success,
+          ),
 
         new ButtonBuilder()
           .setCustomId(
             `release:reject:${request.id}`,
           )
           .setLabel("Reject")
-          .setStyle(ButtonStyle.Danger),
+          .setStyle(
+            ButtonStyle.Danger,
+          ),
       );
 
   let sent = 0;
 
-  for (const managerId of managerIds) {
+  for (
+    const managerId of
+    managerIds
+  ) {
     try {
       const user =
         await interaction.client.users.fetch(
@@ -2544,20 +2860,27 @@ async function roster(
   interaction: ChatInputCommandInteraction,
 ) {
   const teamRole =
-    interaction.options.getRole("team");
+    interaction.options.getRole(
+      "team",
+    );
 
-  let teamId: string | null = null;
+  let teamId:
+    | string
+    | null = null;
 
   if (teamRole) {
-    const { data: team } =
-      await supabase
-        .from("teams")
-        .select("id,name")
-        .eq(
-          "discord_role_id",
-          teamRole.id,
-        )
-        .maybeSingle();
+    const {
+      data: team,
+    } = await supabase
+      .from("teams")
+      .select(
+        "id,name",
+      )
+      .eq(
+        "discord_role_id",
+        teamRole.id,
+      )
+      .maybeSingle();
 
     if (!team) {
       return interaction.reply({
@@ -2567,26 +2890,38 @@ async function roster(
       });
     }
 
-    teamId = team.id;
-  } else if (interaction.guildId) {
+    teamId =
+      team.id;
+  } else if (
+    interaction.guildId
+  ) {
     const settings =
       await getGuildSettings(
         interaction.guildId,
       );
 
     if (settings?.league_id) {
-      const { data: teams } =
-        await supabase
-          .from("teams")
-          .select("id,name")
-          .eq(
-            "league_id",
-            settings.league_id,
-          )
-          .order("name");
+      const {
+        data: teams,
+      } = await supabase
+        .from("teams")
+        .select(
+          "id,name",
+        )
+        .eq(
+          "league_id",
+          settings.league_id,
+        )
+        .order(
+          "name",
+        );
 
-      if (teams && teams.length === 1) {
-        teamId = teams[0].id;
+      if (
+        teams &&
+        teams.length === 1
+      ) {
+        teamId =
+          teams[0].id;
       }
     }
   }
@@ -2599,14 +2934,18 @@ async function roster(
     });
   }
 
-  const { data: team } =
-    await supabase
-      .from("teams")
-      .select(
-        "id,name,logo_url,budget",
-      )
-      .eq("id", teamId)
-      .maybeSingle();
+  const {
+    data: team,
+  } = await supabase
+    .from("teams")
+    .select(
+      "id,name,logo_url,budget",
+    )
+    .eq(
+      "id",
+      teamId,
+    )
+    .maybeSingle();
 
   if (!team) {
     return interaction.reply({
@@ -2624,8 +2963,13 @@ async function roster(
     .select(
       "id,username,display_name,position,discord_id,loan_team_id",
     )
-    .eq("team_id", team.id)
-    .order("username");
+    .eq(
+      "team_id",
+      team.id,
+    )
+    .order(
+      "username",
+    );
 
   if (error) {
     console.error(error);
@@ -2637,34 +2981,41 @@ async function roster(
     });
   }
 
-  if (!players || players.length === 0) {
+  if (
+    !players ||
+    players.length === 0
+  ) {
     return interaction.reply({
       content:
         `📋 **${team.name}** currently has no players registered.`,
     });
   }
 
-  const lines = players.map(
-    (player, index) => {
-      const name =
-        player.display_name ??
-        player.username;
+  const lines =
+    players.map(
+      (
+        player,
+        index,
+      ) => {
+        const name =
+          player.display_name ??
+          player.username;
 
-      const position =
-        player.position
-          ? ` • ${player.position}`
-          : "";
+        const position =
+          player.position
+            ? ` • ${player.position}`
+            : "";
 
-      const loan =
-        player.loan_team_id
-          ? " • 🔄 Loan"
-          : "";
+        const loan =
+          player.loan_team_id
+            ? " • 🔄 Loan"
+            : "";
 
-      return (
-        `**${index + 1}.** ${name}${position}${loan}`
-      );
-    },
-  );
+        return (
+          `**${index + 1}.** ${name}${position}${loan}`
+        );
+      },
+    );
 
   return interaction.reply({
     content:
@@ -2706,7 +3057,9 @@ async function createLoanOffer(
 
 async function createMarketOffer(
   interaction: ChatInputCommandInteraction,
-  offerType: "transfer" | "loan",
+  offerType:
+    | "transfer"
+    | "loan",
 ) {
   if (!interaction.guildId) {
     return interaction.reply({
@@ -2798,17 +3151,18 @@ async function createMarketOffer(
     });
   }
 
-  const { data: player } =
-    await supabase
-      .from("players")
-      .select(
-        "id,username,display_name,discord_id,team_id,loan_team_id",
-      )
-      .eq(
-        "discord_id",
-        playerUser.id,
-      )
-      .maybeSingle();
+  const {
+    data: player,
+  } = await supabase
+    .from("players")
+    .select(
+      "id,username,display_name,discord_id,team_id,loan_team_id",
+    )
+    .eq(
+      "discord_id",
+      playerUser.id,
+    )
+    .maybeSingle();
 
   if (!player) {
     return interaction.reply({
@@ -2826,7 +3180,10 @@ async function createMarketOffer(
     });
   }
 
-  if (player.team_id === fromTeam.id) {
+  if (
+    player.team_id ===
+    fromTeam.id
+  ) {
     return interaction.reply({
       content:
         "❌ You can't make an offer for a player already at your club.",
@@ -2857,7 +3214,8 @@ async function createMarketOffer(
   }
 
   if (
-    Number(fromTeam.budget) < fee
+    Number(fromTeam.budget) <
+    fee
   ) {
     return interaction.reply({
       content:
@@ -2868,13 +3226,23 @@ async function createMarketOffer(
 
   const {
     data: existing,
-  } = await supabase
-    .from("transfer_offers")
-    .select("id")
-    .eq("player_id", player.id)
-    .eq("to_team_id", fromTeam.id)
-    .eq("status", "pending")
-    .maybeSingle();
+  } =
+    await supabase
+      .from("transfer_offers")
+      .select("id")
+      .eq(
+        "player_id",
+        player.id,
+      )
+      .eq(
+        "to_team_id",
+        fromTeam.id,
+      )
+      .eq(
+        "status",
+        "pending",
+      )
+      .maybeSingle();
 
   if (existing) {
     return interaction.reply({
@@ -2887,22 +3255,33 @@ async function createMarketOffer(
   const {
     data: offer,
     error,
-  } = await supabase
-    .from("transfer_offers")
-    .insert({
-      player_id: player.id,
-      from_team_id: player.team_id,
-      to_team_id: fromTeam.id,
-      offered_by: profile.id,
-      fee,
-      status: "pending",
-      offer_type: offerType,
-      terms: terms ?? null,
-    })
-    .select()
-    .single();
+  } =
+    await supabase
+      .from("transfer_offers")
+      .insert({
+        player_id:
+          player.id,
+        from_team_id:
+          player.team_id,
+        to_team_id:
+          fromTeam.id,
+        offered_by:
+          profile.id,
+        fee,
+        status:
+          "pending",
+        offer_type:
+          offerType,
+        terms:
+          terms ?? null,
+      })
+      .select()
+      .single();
 
-  if (error || !offer) {
+  if (
+    error ||
+    !offer
+  ) {
     console.error(error);
 
     return interaction.reply({
@@ -2929,19 +3308,26 @@ async function createMarketOffer(
               ? "Accept Loan"
               : "Accept Transfer",
           )
-          .setStyle(ButtonStyle.Success),
+          .setStyle(
+            ButtonStyle.Success,
+          ),
 
         new ButtonBuilder()
           .setCustomId(
             `${offerType}:reject:${offer.id}`,
           )
           .setLabel("Reject")
-          .setStyle(ButtonStyle.Danger),
+          .setStyle(
+            ButtonStyle.Danger,
+          ),
       );
 
   let sent = 0;
 
-  for (const managerId of managerIds) {
+  for (
+    const managerId of
+    managerIds
+  ) {
     try {
       const user =
         await interaction.client.users.fetch(
@@ -2957,7 +3343,9 @@ async function createMarketOffer(
           `💰 Fee: **${fee}**\n` +
           `📝 Terms: ${terms ?? "No additional terms."}\n\n` +
           `Review the offer below:`,
-        components: [row],
+        components: [
+          row,
+        ],
       });
 
       sent++;
@@ -2973,9 +3361,13 @@ async function createMarketOffer(
     await supabase
       .from("transfer_offers")
       .update({
-        status: "cancelled",
+        status:
+          "cancelled",
       })
-      .eq("id", offer.id);
+      .eq(
+        "id",
+        offer.id,
+      );
 
     return interaction.reply({
       content:
@@ -3008,42 +3400,69 @@ async function canRespondToOffer(
       interaction.user.id,
     );
 
-  if (!profile) return false;
+  if (!profile) {
+    return false;
+  }
 
-  const { data: team } =
-    await supabase
-      .from("teams")
-      .select(
-        "id,manager_id,league_id",
-      )
-      .eq("id", fromTeamId)
-      .maybeSingle();
+  const {
+    data: team,
+  } = await supabase
+    .from("teams")
+    .select(
+      "id,manager_id,league_id",
+    )
+    .eq(
+      "id",
+      fromTeamId,
+    )
+    .maybeSingle();
 
-  if (!team) return false;
+  if (!team) {
+    return false;
+  }
 
   if (
-    team.manager_id === profile.id
+    team.manager_id ===
+    profile.id
   ) {
     return true;
   }
 
-  const { data: staff } =
+  const {
+    data: staff,
+  } =
     await supabase
       .from("team_staff")
       .select("role")
-      .eq("team_id", fromTeamId)
-      .eq("user_id", profile.id)
+      .eq(
+        "team_id",
+        fromTeamId,
+      )
+      .eq(
+        "user_id",
+        profile.id,
+      )
       .maybeSingle();
 
-  if (!staff) return false;
+  if (!staff) {
+    return false;
+  }
 
   const role =
-    String(staff.role ?? "").toLowerCase();
+    String(
+      staff.role ?? "",
+    ).toLowerCase();
 
   return (
-    role.includes("manager") ||
-    role.includes("co-manager") ||
-    role.includes("comanager")
+    role.includes(
+      "manager",
+    ) ||
+    role.includes(
+      "co-manager",
+    ) ||
+    role.includes(
+      "comanager",
+    )
   );
 }
 
@@ -3058,15 +3477,22 @@ async function acceptOffer(
   const {
     data: offer,
     error,
-  } = await supabase
-    .from("transfer_offers")
-    .select(
-      "id,player_id,from_team_id,to_team_id,offered_by,fee,status,offer_type,terms",
-    )
-    .eq("id", offerId)
-    .maybeSingle();
+  } =
+    await supabase
+      .from("transfer_offers")
+      .select(
+        "id,player_id,from_team_id,to_team_id,offered_by,fee,status,offer_type,terms",
+      )
+      .eq(
+        "id",
+        offerId,
+      )
+      .maybeSingle();
 
-  if (error || !offer) {
+  if (
+    error ||
+    !offer
+  ) {
     console.error(error);
 
     return interaction.reply({
@@ -3076,7 +3502,10 @@ async function acceptOffer(
     });
   }
 
-  if (offer.status !== "pending") {
+  if (
+    offer.status !==
+    "pending"
+  ) {
     return interaction.reply({
       content:
         `⚠️ This offer has already been **${offer.status}**.`,
@@ -3108,13 +3537,17 @@ async function acceptOffer(
 
   const {
     data: player,
-  } = await supabase
-    .from("players")
-    .select(
-      "id,username,display_name,team_id,loan_team_id",
-    )
-    .eq("id", offer.player_id)
-    .maybeSingle();
+  } =
+    await supabase
+      .from("players")
+      .select(
+        "id,username,display_name,team_id,loan_team_id",
+      )
+      .eq(
+        "id",
+        offer.player_id,
+      )
+      .maybeSingle();
 
   if (!player) {
     return interaction.reply({
@@ -3137,25 +3570,36 @@ async function acceptOffer(
 
   const {
     data: buyer,
-  } = await supabase
-    .from("teams")
-    .select(
-      "id,name,budget,league_id,division_id",
-    )
-    .eq("id", offer.to_team_id)
-    .maybeSingle();
+  } =
+    await supabase
+      .from("teams")
+      .select(
+        "id,name,budget,league_id,division_id",
+      )
+      .eq(
+        "id",
+        offer.to_team_id,
+      )
+      .maybeSingle();
 
   const {
     data: seller,
-  } = await supabase
-    .from("teams")
-    .select(
-      "id,name,budget,league_id,division_id",
-    )
-    .eq("id", offer.from_team_id)
-    .maybeSingle();
+  } =
+    await supabase
+      .from("teams")
+      .select(
+        "id,name,budget,league_id,division_id",
+      )
+      .eq(
+        "id",
+        offer.from_team_id,
+      )
+      .maybeSingle();
 
-  if (!buyer || !seller) {
+  if (
+    !buyer ||
+    !seller
+  ) {
     return interaction.reply({
       content:
         "❌ One of the clubs no longer exists.",
@@ -3187,11 +3631,10 @@ async function acceptOffer(
     });
   }
 
-  /*
-   * LOAN
-   */
-
-  if (offer.offer_type === "loan") {
+  if (
+    offer.offer_type ===
+    "loan"
+  ) {
     if (player.loan_team_id) {
       return interaction.reply({
         content:
@@ -3200,17 +3643,25 @@ async function acceptOffer(
       });
     }
 
-    const { data: currentGameweek } =
+    const {
+      data: currentGameweek,
+    } =
       await supabase
         .from("gameweeks")
-        .select("number")
+        .select(
+          "number",
+        )
         .eq(
           "division_id",
           seller.division_id,
         )
-        .order("number", {
-          ascending: false,
-        })
+        .order(
+          "number",
+          {
+            ascending:
+              false,
+          },
+        )
         .limit(1)
         .maybeSingle();
 
@@ -3218,19 +3669,33 @@ async function acceptOffer(
       currentGameweek?.number ??
       1;
 
-    const { error: budgetError } =
+    const {
+      error: budgetError,
+    } =
       await supabase
         .from("teams")
         .update({
           budget:
-            Number(buyer.budget) -
-            Number(offer.fee),
+            Number(
+              buyer.budget,
+            ) -
+            Number(
+              offer.fee,
+            ),
         })
-        .eq("id", buyer.id)
-        .gte("budget", offer.fee);
+        .eq(
+          "id",
+          buyer.id,
+        )
+        .gte(
+          "budget",
+          offer.fee,
+        );
 
     if (budgetError) {
-      console.error(budgetError);
+      console.error(
+        budgetError,
+      );
 
       return interaction.reply({
         content:
@@ -3239,17 +3704,29 @@ async function acceptOffer(
       });
     }
 
-    const { error: sellerBudgetError } =
+    const {
+      error:
+        sellerBudgetError,
+    } =
       await supabase
         .from("teams")
         .update({
           budget:
-            Number(seller.budget) +
-            Number(offer.fee),
+            Number(
+              seller.budget,
+            ) +
+            Number(
+              offer.fee,
+            ),
         })
-        .eq("id", seller.id);
+        .eq(
+          "id",
+          seller.id,
+        );
 
-    if (sellerBudgetError) {
+    if (
+      sellerBudgetError
+    ) {
       console.error(
         sellerBudgetError,
       );
@@ -3258,9 +3735,14 @@ async function acceptOffer(
         .from("teams")
         .update({
           budget:
-            Number(buyer.budget),
+            Number(
+              buyer.budget,
+            ),
         })
-        .eq("id", buyer.id);
+        .eq(
+          "id",
+          buyer.id,
+        );
 
       return interaction.reply({
         content:
@@ -3269,13 +3751,18 @@ async function acceptOffer(
       });
     }
 
-    const { error: loanError } =
+    const {
+      error: loanError,
+    } =
       await supabase
         .from("loans")
         .insert({
-          player_id: player.id,
-          parent_team_id: seller.id,
-          loan_team_id: buyer.id,
+          player_id:
+            player.id,
+          parent_team_id:
+            seller.id,
+          loan_team_id:
+            buyer.id,
           division_id:
             buyer.division_id ??
             seller.division_id,
@@ -3283,29 +3770,44 @@ async function acceptOffer(
             startGameweek,
           start_date:
             new Date().toISOString(),
-          end_gameweek: null,
-          end_date: null,
-          status: "active",
+          end_gameweek:
+            null,
+          end_date:
+            null,
+          status:
+            "active",
         });
 
     if (loanError) {
-      console.error(loanError);
+      console.error(
+        loanError,
+      );
 
       await supabase
         .from("teams")
         .update({
           budget:
-            Number(buyer.budget),
+            Number(
+              buyer.budget,
+            ),
         })
-        .eq("id", buyer.id);
+        .eq(
+          "id",
+          buyer.id,
+        );
 
       await supabase
         .from("teams")
         .update({
           budget:
-            Number(seller.budget),
+            Number(
+              seller.budget,
+            ),
         })
-        .eq("id", seller.id);
+        .eq(
+          "id",
+          seller.id,
+        );
 
       return interaction.reply({
         content:
@@ -3314,17 +3816,28 @@ async function acceptOffer(
       });
     }
 
-    const { error: playerError } =
+    const {
+      error: playerError,
+    } =
       await supabase
         .from("players")
         .update({
-          loan_team_id: buyer.id,
+          loan_team_id:
+            buyer.id,
         })
-        .eq("id", player.id)
-        .eq("team_id", seller.id);
+        .eq(
+          "id",
+          player.id,
+        )
+        .eq(
+          "team_id",
+          seller.id,
+        );
 
     if (playerError) {
-      console.error(playerError);
+      console.error(
+        playerError,
+      );
 
       return interaction.reply({
         content:
@@ -3336,13 +3849,21 @@ async function acceptOffer(
     await supabase
       .from("transfer_offers")
       .update({
-        status: "accepted",
+        status:
+          "accepted",
         responded_at:
           new Date().toISOString(),
-        responded_by: profile.id,
+        responded_by:
+          profile.id,
       })
-      .eq("id", offer.id)
-      .eq("status", "pending");
+      .eq(
+        "id",
+        offer.id,
+      )
+      .eq(
+        "status",
+        "pending",
+      );
 
     await interaction.update({
       content:
@@ -3363,20 +3884,29 @@ async function acceptOffer(
     return;
   }
 
-  /*
-   * PERMANENT TRANSFER
-   */
-
-  const { error: buyerBudgetError } =
+  const {
+    error:
+      buyerBudgetError,
+  } =
     await supabase
       .from("teams")
       .update({
         budget:
-          Number(buyer.budget) -
-          Number(offer.fee),
+          Number(
+            buyer.budget,
+          ) -
+          Number(
+            offer.fee,
+          ),
       })
-      .eq("id", buyer.id)
-      .gte("budget", offer.fee);
+      .eq(
+        "id",
+        buyer.id,
+      )
+      .gte(
+        "budget",
+        offer.fee,
+      );
 
   if (buyerBudgetError) {
     console.error(
@@ -3390,15 +3920,25 @@ async function acceptOffer(
     });
   }
 
-  const { error: sellerBudgetError } =
+  const {
+    error:
+      sellerBudgetError,
+  } =
     await supabase
       .from("teams")
       .update({
         budget:
-          Number(seller.budget) +
-          Number(offer.fee),
+          Number(
+            seller.budget,
+          ) +
+          Number(
+            offer.fee,
+          ),
       })
-      .eq("id", seller.id);
+      .eq(
+        "id",
+        seller.id,
+      );
 
   if (sellerBudgetError) {
     console.error(
@@ -3409,9 +3949,14 @@ async function acceptOffer(
       .from("teams")
       .update({
         budget:
-          Number(buyer.budget),
+          Number(
+            buyer.budget,
+          ),
       })
-      .eq("id", buyer.id);
+      .eq(
+        "id",
+        buyer.id,
+      );
 
     return interaction.reply({
       content:
@@ -3420,18 +3965,30 @@ async function acceptOffer(
     });
   }
 
-  const { error: playerError } =
+  const {
+    error: playerError,
+  } =
     await supabase
       .from("players")
       .update({
-        team_id: buyer.id,
-        loan_team_id: null,
+        team_id:
+          buyer.id,
+        loan_team_id:
+          null,
       })
-      .eq("id", player.id)
-      .eq("team_id", seller.id);
+      .eq(
+        "id",
+        player.id,
+      )
+      .eq(
+        "team_id",
+        seller.id,
+      );
 
   if (playerError) {
-    console.error(playerError);
+    console.error(
+      playerError,
+    );
 
     return interaction.reply({
       content:
@@ -3450,13 +4007,18 @@ async function acceptOffer(
     buyer.id,
   );
 
-  const { error: transferError } =
+  const {
+    error: transferError,
+  } =
     await supabase
       .from("transfers")
       .insert({
-        player_id: player.id,
-        from_team_id: seller.id,
-        to_team_id: buyer.id,
+        player_id:
+          player.id,
+        from_team_id:
+          seller.id,
+        to_team_id:
+          buyer.id,
         transfer_date:
           new Date()
             .toISOString()
@@ -3464,8 +4026,10 @@ async function acceptOffer(
         details:
           offer.terms ??
           "Transfer completed via NOVA Discord bot.",
-        fee: offer.fee,
-        status: "completed",
+        fee:
+          offer.fee,
+        status:
+          "completed",
         completed_at:
           new Date().toISOString(),
       });
@@ -3476,14 +4040,20 @@ async function acceptOffer(
     );
   }
 
-  const { error: signingError } =
+  const {
+    error: signingError,
+  } =
     await supabase
       .from("signings")
       .insert({
-        player_id: player.id,
-        team_id: buyer.id,
-        previous_team_id: seller.id,
-        signed_by: profile.id,
+        player_id:
+          player.id,
+        team_id:
+          buyer.id,
+        previous_team_id:
+          seller.id,
+        signed_by:
+          profile.id,
         details:
           offer.terms ??
           "Transfer completed via NOVA Discord bot.",
@@ -3498,13 +4068,21 @@ async function acceptOffer(
   await supabase
     .from("transfer_offers")
     .update({
-      status: "accepted",
+      status:
+        "accepted",
       responded_at:
         new Date().toISOString(),
-      responded_by: profile.id,
+      responded_by:
+        profile.id,
     })
-    .eq("id", offer.id)
-    .eq("status", "pending");
+    .eq(
+      "id",
+      offer.id,
+    )
+    .eq(
+      "status",
+      "pending",
+    );
 
   await interaction.update({
     content:
@@ -3535,15 +4113,22 @@ async function rejectOffer(
   const {
     data: offer,
     error,
-  } = await supabase
-    .from("transfer_offers")
-    .select(
-      "id,player_id,from_team_id,to_team_id,offered_by,status,offer_type",
-    )
-    .eq("id", offerId)
-    .maybeSingle();
+  } =
+    await supabase
+      .from("transfer_offers")
+      .select(
+        "id,player_id,from_team_id,to_team_id,offered_by,status,offer_type",
+      )
+      .eq(
+        "id",
+        offerId,
+      )
+      .maybeSingle();
 
-  if (error || !offer) {
+  if (
+    error ||
+    !offer
+  ) {
     return interaction.reply({
       content:
         "❌ Offer not found.",
@@ -3551,7 +4136,10 @@ async function rejectOffer(
     });
   }
 
-  if (offer.status !== "pending") {
+  if (
+    offer.status !==
+    "pending"
+  ) {
     return interaction.reply({
       content:
         `⚠️ This offer has already been **${offer.status}**.`,
@@ -3594,23 +4182,36 @@ async function rejectOffer(
     });
   }
 
-  const { data: seller } =
+  const {
+    data: seller,
+  } =
     await supabase
       .from("teams")
       .select("name")
-      .eq("id", offer.from_team_id)
+      .eq(
+        "id",
+        offer.from_team_id,
+      )
       .maybeSingle();
 
   await supabase
     .from("transfer_offers")
     .update({
-      status: "rejected",
+      status:
+        "rejected",
       responded_at:
         new Date().toISOString(),
-      responded_by: profile.id,
+      responded_by:
+        profile.id,
     })
-    .eq("id", offer.id)
-    .eq("status", "pending");
+    .eq(
+      "id",
+      offer.id,
+    )
+    .eq(
+      "status",
+      "pending",
+    );
 
   await interaction.update({
     content:
@@ -3636,15 +4237,22 @@ async function acceptRelease(
   const {
     data: request,
     error,
-  } = await supabase
-    .from("release_requests")
-    .select(
-      "id,player_id,team_id,requested_by,status",
-    )
-    .eq("id", requestId)
-    .maybeSingle();
+  } =
+    await supabase
+      .from("release_requests")
+      .select(
+        "id,player_id,team_id,requested_by,status",
+      )
+      .eq(
+        "id",
+        requestId,
+      )
+      .maybeSingle();
 
-  if (error || !request) {
+  if (
+    error ||
+    !request
+  ) {
     return interaction.reply({
       content:
         "❌ Release request not found.",
@@ -3652,7 +4260,10 @@ async function acceptRelease(
     });
   }
 
-  if (request.status !== "pending") {
+  if (
+    request.status !==
+    "pending"
+  ) {
     return interaction.reply({
       content:
         `⚠️ This release request has already been **${request.status}**.`,
@@ -3687,18 +4298,24 @@ async function acceptRelease(
     });
   }
 
-  const { data: player } =
+  const {
+    data: player,
+  } =
     await supabase
       .from("players")
       .select(
         "id,username,display_name,team_id",
       )
-      .eq("id", request.player_id)
+      .eq(
+        "id",
+        request.player_id,
+      )
       .maybeSingle();
 
   if (
     !player ||
-    player.team_id !== request.team_id
+    player.team_id !==
+      request.team_id
   ) {
     return interaction.reply({
       content:
@@ -3707,18 +4324,28 @@ async function acceptRelease(
     });
   }
 
-  const { error: playerError } =
+  const {
+    error: playerError,
+  } =
     await supabase
       .from("players")
       .update({
         team_id: null,
         loan_team_id: null,
       })
-      .eq("id", player.id)
-      .eq("team_id", request.team_id);
+      .eq(
+        "id",
+        player.id,
+      )
+      .eq(
+        "team_id",
+        request.team_id,
+      );
 
   if (playerError) {
-    console.error(playerError);
+    console.error(
+      playerError,
+    );
 
     return interaction.reply({
       content:
@@ -3735,13 +4362,21 @@ async function acceptRelease(
   await supabase
     .from("release_requests")
     .update({
-      status: "accepted",
-      responded_by: profile.id,
+      status:
+        "accepted",
+      responded_by:
+        profile.id,
       responded_at:
         new Date().toISOString(),
     })
-    .eq("id", request.id)
-    .eq("status", "pending");
+    .eq(
+      "id",
+      request.id,
+    )
+    .eq(
+      "status",
+      "pending",
+    );
 
   await interaction.update({
     content:
@@ -3769,15 +4404,22 @@ async function rejectRelease(
   const {
     data: request,
     error,
-  } = await supabase
-    .from("release_requests")
-    .select(
-      "id,player_id,team_id,requested_by,status",
-    )
-    .eq("id", requestId)
-    .maybeSingle();
+  } =
+    await supabase
+      .from("release_requests")
+      .select(
+        "id,player_id,team_id,requested_by,status",
+      )
+      .eq(
+        "id",
+        requestId,
+      )
+      .maybeSingle();
 
-  if (error || !request) {
+  if (
+    error ||
+    !request
+  ) {
     return interaction.reply({
       content:
         "❌ Release request not found.",
@@ -3785,7 +4427,10 @@ async function rejectRelease(
     });
   }
 
-  if (request.status !== "pending") {
+  if (
+    request.status !==
+    "pending"
+  ) {
     return interaction.reply({
       content:
         `⚠️ This release request has already been **${request.status}**.`,
@@ -3820,25 +4465,38 @@ async function rejectRelease(
     });
   }
 
-  const { data: player } =
+  const {
+    data: player,
+  } =
     await supabase
       .from("players")
       .select(
         "id,username,display_name",
       )
-      .eq("id", request.player_id)
+      .eq(
+        "id",
+        request.player_id,
+      )
       .maybeSingle();
 
   await supabase
     .from("release_requests")
     .update({
-      status: "rejected",
-      responded_by: profile.id,
+      status:
+        "rejected",
+      responded_by:
+        profile.id,
       responded_at:
         new Date().toISOString(),
     })
-    .eq("id", request.id)
-    .eq("status", "pending");
+    .eq(
+      "id",
+      request.id,
+    )
+    .eq(
+      "status",
+      "pending",
+    );
 
   await interaction.update({
     content:
@@ -3860,19 +4518,32 @@ async function rejectRelease(
 
 async function notifyOfferCreator(
   interaction: ButtonInteraction,
-  profileId: string | null,
+  profileId:
+    | string
+    | null,
   message: string,
 ) {
-  if (!profileId) return;
+  if (!profileId) {
+    return;
+  }
 
-  const { data: profile } =
+  const {
+    data: profile,
+  } =
     await supabase
       .from("profiles")
-      .select("discord_id")
-      .eq("id", profileId)
+      .select(
+        "discord_id",
+      )
+      .eq(
+        "id",
+        profileId,
+      )
       .maybeSingle();
 
-  if (!profile?.discord_id) return;
+  if (!profile?.discord_id) {
+    return;
+  }
 
   try {
     const user =
@@ -3880,7 +4551,9 @@ async function notifyOfferCreator(
         profile.discord_id,
       );
 
-    await user.send(message);
+    await user.send(
+      message,
+    );
   } catch (error) {
     console.error(
       "Couldn't notify NOVA user:",
@@ -3914,29 +4587,41 @@ const commands = [
     .setDescription(
       "Create and connect a NOVA league",
     )
-    .addStringOption((option) =>
-      option
-        .setName("league")
-        .setDescription("League name")
-        .setRequired(true),
+    .addStringOption(
+      (option) =>
+        option
+          .setName("league")
+          .setDescription(
+            "League name",
+          )
+          .setRequired(true),
     )
-    .addStringOption((option) =>
-      option
-        .setName("division1")
-        .setDescription("Division 1")
-        .setRequired(true),
+    .addStringOption(
+      (option) =>
+        option
+          .setName("division1")
+          .setDescription(
+            "Division 1",
+          )
+          .setRequired(true),
     )
-    .addStringOption((option) =>
-      option
-        .setName("division2")
-        .setDescription("Division 2")
-        .setRequired(false),
+    .addStringOption(
+      (option) =>
+        option
+          .setName("division2")
+          .setDescription(
+            "Division 2",
+          )
+          .setRequired(false),
     )
-    .addStringOption((option) =>
-      option
-        .setName("division3")
-        .setDescription("Division 3")
-        .setRequired(false),
+    .addStringOption(
+      (option) =>
+        option
+          .setName("division3")
+          .setDescription(
+            "Division 3",
+          )
+          .setRequired(false),
     ),
 
   new SlashCommandBuilder()
@@ -3944,62 +4629,87 @@ const commands = [
     .setDescription(
       "Add a team using a Discord role",
     )
-    .addRoleOption((option) =>
-      option
-        .setName("team")
-        .setDescription(
-          "Discord role representing the team",
-        )
-        .setRequired(true),
+    .addRoleOption(
+      (option) =>
+        option
+          .setName("team")
+          .setDescription(
+            "Discord role representing the team",
+          )
+          .setRequired(true),
     )
-    .addStringOption((option) =>
-      option
-        .setName("division")
-        .setDescription("Division name")
-        .setRequired(true),
+    .addStringOption(
+      (option) =>
+        option
+          .setName("division")
+          .setDescription(
+            "Division name",
+          )
+          .setRequired(true),
     )
-    .addAttachmentOption((option) =>
-      option
-        .setName("logo")
-        .setDescription("Team logo")
-        .setRequired(false),
+    .addAttachmentOption(
+      (option) =>
+        option
+          .setName("logo")
+          .setDescription(
+            "Team logo",
+          )
+          .setRequired(false),
     ),
 
   new SlashCommandBuilder()
     .setName("makedivision")
-    .setDescription("Create a division")
-    .addStringOption((option) =>
-      option
-        .setName("division")
-        .setDescription("Division name")
-        .setRequired(true),
+    .setDescription(
+      "Create a division",
     )
-    .addIntegerOption((option) =>
-      option
-        .setName("tier")
-        .setDescription("Division tier")
-        .setMinValue(1)
-        .setRequired(false),
+    .addStringOption(
+      (option) =>
+        option
+          .setName("division")
+          .setDescription(
+            "Division name",
+          )
+          .setRequired(true),
+    )
+    .addIntegerOption(
+      (option) =>
+        option
+          .setName("tier")
+          .setDescription(
+            "Division tier",
+          )
+          .setMinValue(1)
+          .setRequired(false),
     ),
 
   new SlashCommandBuilder()
     .setName("startdivision")
-    .setDescription("Start a division")
-    .addStringOption((option) =>
-      option
-        .setName("division")
-        .setDescription("Division name")
-        .setRequired(true),
+    .setDescription(
+      "Start a division",
+    )
+    .addStringOption(
+      (option) =>
+        option
+          .setName("division")
+          .setDescription(
+            "Division name",
+          )
+          .setRequired(true),
     ),
 
   new SlashCommandBuilder()
     .setName("enddivision")
-    .setDescription("End a division")
-    .addStringOption((option) =>
-      option
-        .setName("division")
-        .setDescription("Division name")
-        .setRequired(true),
+    .setDescription(
+      "End a division",
+    )
+    .addStringOption(
+      (option) =>
+        option
+          .setName("division")
+          .setDescription(
+            "Division name",
+          )
+          .setRequired(true),
     ),
 
   new SlashCommandBuilder()
@@ -4007,11 +4717,14 @@ const commands = [
     .setDescription(
       "Generate a full home and away fixture schedule",
     )
-    .addStringOption((option) =>
-      option
-        .setName("division")
-        .setDescription("Division name")
-        .setRequired(true),
+    .addStringOption(
+      (option) =>
+        option
+          .setName("division")
+          .setDescription(
+            "Division name",
+          )
+          .setRequired(true),
     ),
 
   new SlashCommandBuilder()
@@ -4037,11 +4750,14 @@ const commands = [
     .setDescription(
       "Transfer league connection",
     )
-    .addStringOption((option) =>
-      option
-        .setName("league")
-        .setDescription("League name")
-        .setRequired(true),
+    .addStringOption(
+      (option) =>
+        option
+          .setName("league")
+          .setDescription(
+            "League name",
+          )
+          .setRequired(true),
     ),
 
   new SlashCommandBuilder()
@@ -4049,13 +4765,14 @@ const commands = [
     .setDescription(
       "Sign an unsigned NOVA player",
     )
-    .addUserOption((option) =>
-      option
-        .setName("player")
-        .setDescription(
-          "Unsigned player to sign",
-        )
-        .setRequired(true),
+    .addUserOption(
+      (option) =>
+        option
+          .setName("player")
+          .setDescription(
+            "Unsigned player to sign",
+          )
+          .setRequired(true),
     ),
 
   new SlashCommandBuilder()
@@ -4063,13 +4780,14 @@ const commands = [
     .setDescription(
       "Release a player from your club",
     )
-    .addUserOption((option) =>
-      option
-        .setName("player")
-        .setDescription(
-          "Player to release",
-        )
-        .setRequired(true),
+    .addUserOption(
+      (option) =>
+        option
+          .setName("player")
+          .setDescription(
+            "Player to release",
+          )
+          .setRequired(true),
     ),
 
   new SlashCommandBuilder()
@@ -4077,13 +4795,14 @@ const commands = [
     .setDescription(
       "Request a release from your club",
     )
-    .addStringOption((option) =>
-      option
-        .setName("reason")
-        .setDescription(
-          "Optional reason for requesting release",
-        )
-        .setRequired(false),
+    .addStringOption(
+      (option) =>
+        option
+          .setName("reason")
+          .setDescription(
+            "Optional reason for requesting release",
+          )
+          .setRequired(false),
     ),
 
   new SlashCommandBuilder()
@@ -4091,13 +4810,14 @@ const commands = [
     .setDescription(
       "View a NOVA team's roster",
     )
-    .addRoleOption((option) =>
-      option
-        .setName("team")
-        .setDescription(
-          "Discord role representing the team",
-        )
-        .setRequired(true),
+    .addRoleOption(
+      (option) =>
+        option
+          .setName("team")
+          .setDescription(
+            "Discord role representing the team",
+          )
+          .setRequired(true),
     ),
 
   new SlashCommandBuilder()
@@ -4105,30 +4825,33 @@ const commands = [
     .setDescription(
       "Make a transfer offer for a player",
     )
-    .addUserOption((option) =>
-      option
-        .setName("player")
-        .setDescription(
-          "Player you want to sign",
-        )
-        .setRequired(true),
+    .addUserOption(
+      (option) =>
+        option
+          .setName("player")
+          .setDescription(
+            "Player you want to sign",
+          )
+          .setRequired(true),
     )
-    .addNumberOption((option) =>
-      option
-        .setName("fee")
-        .setDescription(
-          "Transfer fee",
-        )
-        .setMinValue(0)
-        .setRequired(true),
+    .addNumberOption(
+      (option) =>
+        option
+          .setName("fee")
+          .setDescription(
+            "Transfer fee",
+          )
+          .setMinValue(0)
+          .setRequired(true),
     )
-    .addStringOption((option) =>
-      option
-        .setName("terms")
-        .setDescription(
-          "Optional transfer terms",
-        )
-        .setRequired(false),
+    .addStringOption(
+      (option) =>
+        option
+          .setName("terms")
+          .setDescription(
+            "Optional transfer terms",
+          )
+          .setRequired(false),
     ),
 
   new SlashCommandBuilder()
@@ -4136,42 +4859,49 @@ const commands = [
     .setDescription(
       "Make a loan offer for a player",
     )
-    .addUserOption((option) =>
-      option
-        .setName("player")
-        .setDescription(
-          "Player you want to loan",
-        )
-        .setRequired(true),
+    .addUserOption(
+      (option) =>
+        option
+          .setName("player")
+          .setDescription(
+            "Player you want to loan",
+          )
+          .setRequired(true),
     )
-    .addNumberOption((option) =>
-      option
-        .setName("fee")
-        .setDescription(
-          "Loan fee",
-        )
-        .setMinValue(0)
-        .setRequired(true),
+    .addNumberOption(
+      (option) =>
+        option
+          .setName("fee")
+          .setDescription(
+            "Loan fee",
+          )
+          .setMinValue(0)
+          .setRequired(true),
     )
-    .addStringOption((option) =>
-      option
-        .setName("terms")
-        .setDescription(
-          "Optional loan terms",
-        )
-        .setRequired(false),
+    .addStringOption(
+      (option) =>
+        option
+          .setName("terms")
+          .setDescription(
+            "Optional loan terms",
+          )
+          .setRequired(false),
     ),
-].map((command) =>
-  command.toJSON(),
+].map(
+  (command) =>
+    command.toJSON(),
 );
 
 /* =========================
    REGISTER COMMANDS
 ========================= */
 
-const rest = new REST({
-  version: "10",
-}).setToken(token);
+const rest =
+  new REST({
+    version: "10",
+  }).setToken(
+    token,
+  );
 
 try {
   console.log(
