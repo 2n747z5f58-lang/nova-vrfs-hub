@@ -14,6 +14,10 @@ import {
   Wallet,
   Radio,
   CalendarDays,
+  Trophy,
+  RefreshCw,
+  Clock,
+  Lock,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 type League = {
@@ -32,6 +36,8 @@ type Division = {
   tier?: number | null;
   season?: string | null;
   status?: string | null;
+  start_date?: string | null;
+  ended_at?: string | null;
   gameweek_interval_days?: number | null;
 };
 type Team = {
@@ -99,6 +105,53 @@ type GuildSettings = {
   discord_roles?: DiscordRoleOption[] | null;
   discord_channels?: DiscordChannelOption[] | null;
 };
+type Fixture = {
+  id: string;
+  league_id: string | null;
+  division_id: string | null;
+  home_team_id: string | null;
+  away_team_id: string | null;
+  kickoff_at: string;
+  deadline_at: string | null;
+  status: string;
+  home_score: number | null;
+  away_score: number | null;
+  gameweek: number | null;
+  competition: string | null;
+  replay_1st_half: string | null;
+  replay_2nd_half: string | null;
+  replay_extra_time: string | null;
+  completed_at: string | null;
+  completion_source: string;
+  completion_note: string | null;
+};
+type Gameweek = {
+  id: string;
+  division_id: string;
+  number: number;
+  starts_at: string;
+};
+type Standing = {
+  id: string;
+  division_id: string;
+  team_id: string;
+  played: number;
+  won: number;
+  drawn: number;
+  lost: number;
+  goals_for: number;
+  goals_against: number;
+  goal_difference: number;
+  points: number;
+};
+type PointAdjustment = {
+  id: string;
+  division_id: string;
+  team_id: string;
+  points_delta: number;
+  reason: string;
+  created_at: string;
+};
 type Section =
   | "overview"
   | "teams"
@@ -117,6 +170,27 @@ function getTierLabel(tier: number | null | undefined) {
   return (
     TIER_OPTIONS.find((option) => option.value === tier)?.label ?? "Elite"
   );
+}
+function formatDate(value: string | null | undefined) {
+  if (!value) return "Not set";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "Not set";
+  }
+  return date.toLocaleString([], {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+function isFixtureOverdue(fixture: Fixture) {
+  if (!fixture.deadline_at) return false;
+  if (fixture.status === "completed" || fixture.status === "cancelled") {
+    return false;
+  }
+  return new Date(fixture.deadline_at).getTime() < Date.now();
 }
 export const Route = createFileRoute("/league")({
   ssr: false,
@@ -140,6 +214,16 @@ function LeaguePanel() {
   const [confirmedTeams, setConfirmedTeams] = useState<Team[]>([]);
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
   const [members, setMembers] = useState<LeagueMember[]>([]);
+  const [fixtures, setFixtures] = useState<Fixture[]>([]);
+  const [gameweeks, setGameweeks] = useState<Gameweek[]>([]);
+  const [standings, setStandings] = useState<Standing[]>([]);
+  const [pointAdjustments, setPointAdjustments] = useState<
+    PointAdjustment[]
+  >([]);
+  const [competitionLoading, setCompetitionLoading] = useState(false);
+  const [selectedGameweek, setSelectedGameweek] = useState<number | null>(
+    null,
+  );
   const [settings, setSettings] = useState<LeagueSettings>({
     league_id: "",
     max_roster_size: 20,
@@ -192,6 +276,7 @@ function LeaguePanel() {
     try {
       setLoading(true);
       setError(null);
+      setAccessDenied(false);
       const {
         data: { user },
       } = await supabase.auth.getUser();
@@ -281,7 +366,7 @@ function LeaguePanel() {
         supabase
           .from("divisions")
           .select(
-            "id,league_id,name,tier,season,status,gameweek_interval_days",
+            "id,league_id,name,tier,season,status,start_date,ended_at,gameweek_interval_days",
           )
           .eq("league_id", currentLeague.id)
           .order("tier", { ascending: true })
@@ -331,8 +416,10 @@ function LeaguePanel() {
         setError(`Couldn't load teams: ${teamResponse.error.message}`);
         return;
       }
-      setDivisions((divisionResponse.data ?? []) as Division[]);
-      setConfirmedTeams((teamResponse.data ?? []) as Team[]);
+      const loadedDivisions = (divisionResponse.data ?? []) as Division[];
+      const loadedTeams = (teamResponse.data ?? []) as Team[];
+      setDivisions(loadedDivisions);
+      setConfirmedTeams(loadedTeams);
       if (settingsResponse.error) {
         console.warn(
           "League settings could not be loaded:",
@@ -395,8 +482,8 @@ function LeaguePanel() {
       }
       const memberList = (membersResponse.data ?? []) as LeagueMember[];
       setMembers(memberList);
-      const managerIds = (teamResponse.data ?? [])
-        .map((team) => (team as Team).manager_id)
+      const managerIds = loadedTeams
+        .map((team) => team.manager_id)
         .filter((id): id is string => Boolean(id));
       const memberIds = memberList
         .map((member) => member.user_id)
@@ -417,6 +504,7 @@ function LeaguePanel() {
       } else {
         setProfiles({});
       }
+      await loadCompetitionData(currentLeague.id, loadedDivisions, loadedTeams);
     } catch (err) {
       console.error(err);
       setError(
@@ -427,6 +515,365 @@ function LeaguePanel() {
     } finally {
       setLoading(false);
     }
+  }
+  async function loadCompetitionData(
+    leagueId: string,
+    loadedDivisions = divisions,
+    loadedTeams = confirmedTeams,
+  ) {
+    try {
+      setCompetitionLoading(true);
+      const divisionIds = loadedDivisions.map((division) => division.id);
+      if (divisionIds.length === 0) {
+        setFixtures([]);
+        setGameweeks([]);
+        setStandings([]);
+        setPointAdjustments([]);
+        return;
+      }
+      const [
+        fixturesResponse,
+        gameweeksResponse,
+        standingsResponse,
+        adjustmentsResponse,
+      ] = await Promise.all([
+        supabase
+          .from("fixtures")
+          .select(
+            "id,league_id,division_id,home_team_id,away_team_id,kickoff_at,deadline_at,status,home_score,away_score,gameweek,competition,replay_1st_half,replay_2nd_half,replay_extra_time,completed_at,completion_source,completion_note",
+          )
+          .eq("league_id", leagueId)
+          .order("gameweek", { ascending: true })
+          .order("kickoff_at", { ascending: true }),
+        supabase
+          .from("gameweeks")
+          .select("id,division_id,number,starts_at")
+          .in("division_id", divisionIds)
+          .order("number", { ascending: true }),
+        supabase
+          .from("standings")
+          .select(
+            "id,division_id,team_id,played,won,drawn,lost,goals_for,goals_against,goal_difference,points",
+          )
+          .in("division_id", divisionIds)
+          .order("points", { ascending: false }),
+        supabase
+          .from("standings_point_adjustments")
+          .select(
+            "id,division_id,team_id,points_delta,reason,created_at",
+          )
+          .in("division_id", divisionIds)
+          .order("created_at", { ascending: false }),
+      ]);
+      if (fixturesResponse.error) {
+        console.warn(
+          "Fixtures could not be loaded:",
+          fixturesResponse.error,
+        );
+      }
+      if (gameweeksResponse.error) {
+        console.warn(
+          "Gameweeks could not be loaded:",
+          gameweeksResponse.error,
+        );
+      }
+      if (standingsResponse.error) {
+        console.warn(
+          "Standings could not be loaded:",
+          standingsResponse.error,
+        );
+      }
+      if (adjustmentsResponse.error) {
+        console.warn(
+          "Point adjustments could not be loaded:",
+          adjustmentsResponse.error,
+        );
+      }
+      setFixtures((fixturesResponse.data ?? []) as Fixture[]);
+      setGameweeks((gameweeksResponse.data ?? []) as Gameweek[]);
+      setStandings((standingsResponse.data ?? []) as Standing[]);
+      setPointAdjustments(
+        (adjustmentsResponse.data ?? []) as PointAdjustment[],
+      );
+      if (selectedGameweek === null) {
+        const firstGameweek = (gameweeksResponse.data ?? [])[0];
+        if (firstGameweek) {
+          setSelectedGameweek(firstGameweek.number);
+        }
+      }
+      void loadedTeams;
+    } finally {
+      setCompetitionLoading(false);
+    }
+  }
+  async function expireOverdueFixtures() {
+    if (!league) return;
+    setSaving(true);
+    setError(null);
+    setSuccess(null);
+    const { data, error: rpcError } = await supabase.rpc(
+      "expire_overdue_fixtures_for_league",
+      {
+        p_league_id: league.id,
+      },
+    );
+    if (rpcError) {
+      setError(`Couldn't process overdue fixtures: ${rpcError.message}`);
+      setSaving(false);
+      return;
+    }
+    await supabase.rpc("recalculate_league_standings", {
+      p_league_id: league.id,
+    });
+    await loadCompetitionData(league.id);
+    setSaving(false);
+    const count = Number(data ?? 0);
+    setSuccess(
+      count === 0
+        ? "No overdue fixtures needed automatic completion."
+        : `${count} overdue fixture${count === 1 ? "" : "s"} completed 0-0.`,
+    );
+  }
+  async function refreshCompetition() {
+    if (!league) return;
+    setError(null);
+    setSuccess(null);
+    await loadCompetitionData(league.id);
+    setSuccess("Competition data refreshed.");
+  }
+  async function startDivision(division: Division) {
+    if (!league) return;
+    if (division.status === "active") {
+      setError(`${division.name} is already active.`);
+      return;
+    }
+    if (division.status === "ended") {
+      setError(`${division.name} has already ended.`);
+      return;
+    }
+    const divisionTeams = confirmedTeams.filter(
+      (team) => team.division_id === division.id,
+    );
+    if (divisionTeams.length < 2) {
+      setError(
+        `${division.name} needs at least 2 confirmed teams before it can start.`,
+      );
+      return;
+    }
+    const existingFixtures = fixtures.filter(
+      (fixture) => fixture.division_id === division.id,
+    );
+    if (existingFixtures.length > 0) {
+      setError(
+        `${division.name} already has fixtures. The existing schedule will not be replaced.`,
+      );
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    setSuccess(null);
+    const startDate = new Date().toISOString();
+    const { error: divisionError } = await supabase
+      .from("divisions")
+      .update({
+        status: "active",
+        start_date: startDate,
+        gameweek_interval_days:
+          division.gameweek_interval_days ??
+          settings.gameweek_interval_days ??
+          3,
+      })
+      .eq("id", division.id)
+      .eq("league_id", league.id);
+    if (divisionError) {
+      setError(`Couldn't start division: ${divisionError.message}`);
+      setSaving(false);
+      return;
+    }
+    const totalTeams = divisionTeams.length;
+    const teams =
+      totalTeams % 2 === 0
+        ? [...divisionTeams]
+        : [
+            ...divisionTeams,
+            {
+              id: "BYE",
+              name: "BYE",
+            } as Team,
+          ];
+    const rounds = teams.length - 1;
+    const gamesPerRound = teams.length / 2;
+    const firstHalf: Array<
+      Array<{ home: string; away: string }>
+    > = [];
+    let rotation = [...teams];
+    for (let round = 0; round < rounds; round++) {
+      const matches: Array<{ home: string; away: string }> = [];
+      for (let index = 0; index < gamesPerRound; index++) {
+        const first = rotation[index];
+        const second = rotation[rotation.length - 1 - index];
+        if (first.id === "BYE" || second.id === "BYE") {
+          continue;
+        }
+        if (round % 2 === 0) {
+          matches.push({
+            home: first.id,
+            away: second.id,
+          });
+        } else {
+          matches.push({
+            home: second.id,
+            away: first.id,
+          });
+        }
+      }
+      firstHalf.push(matches);
+      rotation = [
+        rotation[0],
+        rotation[rotation.length - 1],
+        ...rotation.slice(1, rotation.length - 1),
+      ];
+    }
+    const allRounds = [
+      ...firstHalf,
+      ...firstHalf.map((round) =>
+        round.map((match) => ({
+          home: match.away,
+          away: match.home,
+        })),
+      ),
+    ];
+    const intervalDays =
+      division.gameweek_interval_days ??
+      settings.gameweek_interval_days ??
+      3;
+    const gameweekRows = allRounds.map((_, index) => {
+      const startsAt = new Date(startDate);
+      startsAt.setDate(
+        startsAt.getDate() + index * intervalDays,
+      );
+      return {
+        division_id: division.id,
+        number: index + 1,
+        starts_at: startsAt.toISOString(),
+      };
+    });
+    const { data: createdGameweeks, error: gameweekError } =
+      await supabase
+        .from("gameweeks")
+        .insert(gameweekRows)
+        .select("id,division_id,number,starts_at");
+    if (gameweekError || !createdGameweeks) {
+      await supabase
+        .from("divisions")
+        .update({
+          status: "draft",
+          start_date: null,
+        })
+        .eq("id", division.id);
+      setError(
+        `Couldn't create gameweeks: ${
+          gameweekError?.message ?? "Unknown error"
+        }`,
+      );
+      setSaving(false);
+      return;
+    }
+    const fixtureRows: Array<{
+      league_id: string;
+      division_id: string;
+      home_team_id: string;
+      away_team_id: string;
+      kickoff_at: string;
+      deadline_at: string;
+      status: string;
+      home_score: null;
+      away_score: null;
+      gameweek: number;
+      competition: string;
+      completion_source: string;
+    }> = [];
+    for (let index = 0; index < allRounds.length; index++) {
+      const round = allRounds[index];
+      const gameweek = createdGameweeks.find(
+        (item) => item.number === index + 1,
+      );
+      if (!gameweek) continue;
+      const deadline = new Date(gameweek.starts_at);
+      deadline.setDate(deadline.getDate() + intervalDays);
+      for (const match of round) {
+        fixtureRows.push({
+          league_id: league.id,
+          division_id: division.id,
+          home_team_id: match.home,
+          away_team_id: match.away,
+          kickoff_at: gameweek.starts_at,
+          deadline_at: deadline.toISOString(),
+          status: "scheduled",
+          home_score: null,
+          away_score: null,
+          gameweek: gameweek.number,
+          competition: division.name,
+          completion_source: "fixture_generation",
+        });
+      }
+    }
+    const { error: fixtureError } = await supabase
+      .from("fixtures")
+      .insert(fixtureRows);
+    if (fixtureError) {
+      await supabase
+        .from("gameweeks")
+        .delete()
+        .eq("division_id", division.id);
+      await supabase
+        .from("divisions")
+        .update({
+          status: "draft",
+          start_date: null,
+        })
+        .eq("id", division.id);
+      setError(
+        `Couldn't create fixtures: ${fixtureError.message}`,
+      );
+      setSaving(false);
+      return;
+    }
+    await loadPanel();
+    setSaving(false);
+    setSuccess(
+      `${division.name} has started with ${createdGameweeks.length} gameweeks and ${fixtureRows.length} fixtures.`,
+    );
+  }
+  async function endDivision(division: Division) {
+    if (!league) return;
+    if (division.status === "ended") {
+      setError(`${division.name} is already ended.`);
+      return;
+    }
+    const confirmed = window.confirm(
+      `End ${division.name}? This locks the division as ended.`,
+    );
+    if (!confirmed) return;
+    setSaving(true);
+    setError(null);
+    setSuccess(null);
+    const { error: endError } = await supabase
+      .from("divisions")
+      .update({
+        status: "ended",
+        ended_at: new Date().toISOString(),
+      })
+      .eq("id", division.id)
+      .eq("league_id", league.id);
+    if (endError) {
+      setError(`Couldn't end division: ${endError.message}`);
+      setSaving(false);
+      return;
+    }
+    await loadPanel();
+    setSaving(false);
+    setSuccess(`${division.name} has been ended.`);
   }
   async function saveDiscordRoles() {
     if (!league) return;
@@ -588,7 +1035,7 @@ function LeaguePanel() {
           settings.gameweek_interval_days || 3,
       })
       .select(
-        "id,league_id,name,tier,season,status,gameweek_interval_days",
+        "id,league_id,name,tier,season,status,start_date,ended_at,gameweek_interval_days",
       )
       .single();
     if (createError) {
@@ -638,7 +1085,7 @@ function LeaguePanel() {
       .eq("id", division.id)
       .eq("league_id", league.id)
       .select(
-        "id,league_id,name,tier,season,status,gameweek_interval_days",
+        "id,league_id,name,tier,season,status,start_date,ended_at,gameweek_interval_days",
       )
       .single();
     if (updateError) {
@@ -670,6 +1117,15 @@ function LeaguePanel() {
     if (divisionTeams.length > 0) {
       setError(
         `You cannot delete ${division.name} while it still has teams in it.`,
+      );
+      return;
+    }
+    const divisionFixtures = fixtures.filter(
+      (fixture) => fixture.division_id === division.id,
+    );
+    if (divisionFixtures.length > 0) {
+      setError(
+        `You cannot delete ${division.name} because it already has fixtures.`,
       );
       return;
     }
@@ -846,15 +1302,58 @@ function LeaguePanel() {
     }
     return grouped;
   }, [divisions, confirmedTeams]);
+  const teamsById = useMemo(() => {
+    const map: Record<string, Team> = {};
+    for (const team of confirmedTeams) {
+      map[team.id] = team;
+    }
+    return map;
+  }, [confirmedTeams]);
+  const divisionsById = useMemo(() => {
+    const map: Record<string, Division> = {};
+    for (const division of divisions) {
+      map[division.id] = division;
+    }
+    return map;
+  }, [divisions]);
+  const standingsByDivision = useMemo(() => {
+    const grouped: Record<string, Standing[]> = {};
+    for (const division of divisions) {
+      grouped[division.id] = [];
+    }
+    for (const row of standings) {
+      if (!grouped[row.division_id]) {
+        grouped[row.division_id] = [];
+      }
+      grouped[row.division_id].push(row);
+    }
+    for (const divisionId of Object.keys(grouped)) {
+      grouped[divisionId].sort((a, b) => {
+        if (b.points !== a.points) return b.points - a.points;
+        if (b.goal_difference !== a.goal_difference) {
+          return b.goal_difference - a.goal_difference;
+        }
+        if (b.goals_for !== a.goals_for) {
+          return b.goals_for - a.goals_for;
+        }
+        return (
+          teamsById[a.team_id]?.name.localeCompare(
+            teamsById[b.team_id]?.name ?? "",
+          ) ?? 0
+        );
+      });
+    }
+    return grouped;
+  }, [divisions, standings, teamsById]);
   const selectableDiscordChannels = useMemo(() => {
     return discordChannels
       .filter((channel) =>
         [0, 5, 15, 16].includes(channel.type),
       )
       .sort((a, b) => {
-        const parentCompare = String(a.parent_id ?? "").localeCompare(
-          String(b.parent_id ?? ""),
-        );
+        const parentCompare = String(
+          a.parent_id ?? "",
+        ).localeCompare(String(b.parent_id ?? ""));
         if (parentCompare !== 0) {
           return parentCompare;
         }
@@ -864,15 +1363,47 @@ function LeaguePanel() {
   const selectableDiscordRoles = useMemo(() => {
     return discordRoles
       .filter((role) => !role.managed)
-      .sort((a, b) => (b.position ?? 0) - (a.position ?? 0));
+      .sort(
+        (a, b) =>
+          (b.position ?? 0) - (a.position ?? 0),
+      );
   }, [discordRoles]);
+  const selectedFixtures = useMemo(() => {
+    return fixtures.filter((fixture) => {
+      if (
+        selectedGameweek !== null &&
+        fixture.gameweek !== selectedGameweek
+      ) {
+        return false;
+      }
+      return true;
+    });
+  }, [fixtures, selectedGameweek]);
+  const completedFixtureCount = fixtures.filter(
+    (fixture) => fixture.status === "completed",
+  ).length;
+  const overdueFixtureCount = fixtures.filter(
+    isFixtureOverdue,
+  ).length;
+  const nextGameweek = useMemo(() => {
+    const active = gameweeks.find(
+      (gameweek) => gameweek.number === selectedGameweek,
+    );
+    return active ?? gameweeks[0] ?? null;
+  }, [gameweeks, selectedGameweek]);
   function getManagerName(team: Team) {
     if (!team.manager_id) return "No manager";
     const profile = profiles[team.manager_id];
     if (!profile) return "Manager";
-    return profile.display_name || profile.username || "Manager";
+    return (
+      profile.display_name ||
+      profile.username ||
+      "Manager"
+    );
   }
-  function discordChannelLabel(channel: DiscordChannelOption) {
+  function discordChannelLabel(
+    channel: DiscordChannelOption,
+  ) {
     return `#${channel.name}`;
   }
   function channelSelect(
@@ -881,7 +1412,9 @@ function LeaguePanel() {
   ) {
     return (
       <div>
-        <label className="text-sm font-semibold">{label}</label>
+        <label className="text-sm font-semibold">
+          {label}
+        </label>
         <select
           value={channels[key] ?? ""}
           onChange={(event) =>
@@ -910,10 +1443,14 @@ function LeaguePanel() {
   ) {
     return (
       <div>
-        <label className="text-sm font-semibold">{label}</label>
+        <label className="text-sm font-semibold">
+          {label}
+        </label>
         <select
           value={value}
-          onChange={(event) => onChange(event.target.value)}
+          onChange={(event) =>
+            onChange(event.target.value)
+          }
           className="mt-2 w-full rounded-xl border bg-background px-3 py-3 text-sm outline-none transition focus:ring-2 focus:ring-primary/20"
         >
           <option value="">Not configured</option>
@@ -971,8 +1508,8 @@ function LeaguePanel() {
             League access required
           </h1>
           <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-muted-foreground">
-            Your account is not currently assigned as an Overseer or
-            Co-Overseer of a league.
+            Your account is not currently assigned as an
+            Overseer or Co-Overseer of a league.
           </p>
           <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-center">
             <button
@@ -1122,25 +1659,45 @@ function LeaguePanel() {
                     icon={<CalendarDays className="size-5" />}
                   />
                   <StatCard
-                    label="Max Roster"
-                    value={settings.max_roster_size ?? 20}
-                    icon={<Users className="size-5" />}
+                    label="Fixtures"
+                    value={fixtures.length}
+                    icon={<Trophy className="size-5" />}
                   />
                   <StatCard
-                    label="Gameweek Interval"
-                    value={`${settings.gameweek_interval_days ?? 3}d`}
-                    icon={<CalendarDays className="size-5" />}
+                    label="Completed"
+                    value={completedFixtureCount}
+                    icon={<Check className="size-5" />}
                   />
                 </div>
                 <div className="rounded-2xl border bg-card p-6">
-                  <h2 className="text-xl font-bold">
-                    League control centre
-                  </h2>
-                  <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-                    Manage your league's divisions, participating teams,
-                    transfer rules, budgets, Discord configuration and
-                    Co-Overseers from one place.
-                  </p>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <h2 className="text-xl font-bold">
+                        League control centre
+                      </h2>
+                      <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+                        Manage your league's divisions,
+                        participating teams, competition schedule,
+                        standings, transfer rules, Discord
+                        configuration and Co-Overseers from one
+                        place.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => void refreshCompetition()}
+                      disabled={competitionLoading}
+                      className="inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold transition hover:bg-accent disabled:opacity-50"
+                    >
+                      <RefreshCw
+                        className={`size-4 ${
+                          competitionLoading
+                            ? "animate-spin"
+                            : ""
+                        }`}
+                      />
+                      Refresh
+                    </button>
+                  </div>
                   <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     <QuickAction
                       title="Manage teams"
@@ -1149,7 +1706,7 @@ function LeaguePanel() {
                     />
                     <QuickAction
                       title="Manage divisions"
-                      description="Create and organise divisions."
+                      description="Create, start and organise divisions."
                       onClick={() => setActiveSection("divisions")}
                     />
                     <QuickAction
@@ -1174,6 +1731,170 @@ function LeaguePanel() {
                     />
                   </div>
                 </div>
+                <div className="rounded-2xl border bg-card p-6">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <Trophy className="size-5" />
+                        <h2 className="text-xl font-bold">
+                          Competition
+                        </h2>
+                      </div>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Live fixtures, deadlines and standings
+                        from the NOVA database.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() =>
+                        void expireOverdueFixtures()
+                      }
+                      disabled={
+                        saving ||
+                        competitionLoading ||
+                        overdueFixtureCount === 0
+                      }
+                      className="inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold transition hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <Clock className="size-4" />
+                      Process deadlines
+                    </button>
+                  </div>
+                  <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                    <MiniStat
+                      label="Gameweeks"
+                      value={gameweeks.length}
+                    />
+                    <MiniStat
+                      label="Overdue"
+                      value={overdueFixtureCount}
+                    />
+                    <MiniStat
+                      label="Point adjustments"
+                      value={pointAdjustments.length}
+                    />
+                  </div>
+                  {gameweeks.length > 0 && (
+                    <div className="mt-6">
+                      <div className="flex flex-wrap gap-2">
+                        {gameweeks.map((gameweek) => (
+                          <button
+                            key={gameweek.id}
+                            onClick={() =>
+                              setSelectedGameweek(
+                                gameweek.number,
+                              )
+                            }
+                            className={`rounded-lg border px-3 py-2 text-xs font-semibold transition ${
+                              selectedGameweek ===
+                              gameweek.number
+                                ? "bg-primary text-primary-foreground"
+                                : "hover:bg-accent"
+                            }`}
+                          >
+                            GW {gameweek.number}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {nextGameweek && (
+                    <div className="mt-5 rounded-xl border bg-background p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                            Selected Gameweek
+                          </p>
+                          <p className="mt-1 font-bold">
+                            Gameweek {nextGameweek.number}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xs text-muted-foreground">
+                            Starts
+                          </p>
+                          <p className="text-sm font-semibold">
+                            {formatDate(
+                              nextGameweek.starts_at,
+                            )}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {selectedFixtures.length > 0 ? (
+                    <div className="mt-5 space-y-2">
+                      {selectedFixtures
+                        .slice(0, 12)
+                        .map((fixture) => (
+                          <FixtureRow
+                            key={fixture.id}
+                            fixture={fixture}
+                            homeTeam={
+                              fixture.home_team_id
+                                ? teamsById[
+                                    fixture.home_team_id
+                                  ]
+                                : undefined
+                            }
+                            awayTeam={
+                              fixture.away_team_id
+                                ? teamsById[
+                                    fixture.away_team_id
+                                  ]
+                                : undefined
+                            }
+                          />
+                        ))}
+                    </div>
+                  ) : (
+                    <div className="mt-5 rounded-xl border border-dashed px-5 py-8 text-center text-sm text-muted-foreground">
+                      No fixtures have been generated yet.
+                    </div>
+                  )}
+                </div>
+                {divisions.map((division) => {
+                  const rows =
+                    standingsByDivision[division.id] ??
+                    [];
+                  if (rows.length === 0) {
+                    return null;
+                  }
+                  return (
+                    <div
+                      key={division.id}
+                      className="rounded-2xl border bg-card p-6"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h2 className="text-xl font-bold">
+                              {division.name}
+                            </h2>
+                            <span className="rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase">
+                              {getTierLabel(
+                                division.tier,
+                              )}
+                            </span>
+                          </div>
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            Live standings
+                          </p>
+                        </div>
+                        <Trophy className="size-5" />
+                      </div>
+                      <StandingTable
+                        rows={rows}
+                        teamsById={teamsById}
+                        adjustments={pointAdjustments.filter(
+                          (adjustment) =>
+                            adjustment.division_id ===
+                            division.id,
+                        )}
+                      />
+                    </div>
+                  );
+                })}
               </div>
             )}
             {activeSection === "teams" && (
@@ -1183,8 +1904,9 @@ function LeaguePanel() {
                     Confirm a NOVA team
                   </h2>
                   <p className="mt-2 text-sm text-muted-foreground">
-                    Search for any team registered on NOVA, select it,
-                    choose its division, then confirm it into this league.
+                    Search for any team registered on NOVA,
+                    select it, choose its division, then confirm
+                    it into this league.
                   </p>
                   <div className="mt-5 grid gap-4 lg:grid-cols-[1fr_240px_auto]">
                     <div className="relative">
@@ -1193,7 +1915,9 @@ function LeaguePanel() {
                         <input
                           value={teamSearch}
                           onChange={(event) =>
-                            void searchTeams(event.target.value)
+                            void searchTeams(
+                              event.target.value,
+                            )
                           }
                           placeholder="Search registered teams..."
                           className="w-full rounded-xl border bg-background py-3 pl-10 pr-3 text-sm outline-none focus:ring-2 focus:ring-primary/20"
@@ -1202,56 +1926,70 @@ function LeaguePanel() {
                           <Loader2 className="absolute right-3 top-1/2 size-4 -translate-y-1/2 animate-spin text-muted-foreground" />
                         )}
                       </div>
-                      {teamResults.length > 0 && !selectedTeam && (
-                        <div className="absolute z-20 mt-2 max-h-64 w-full overflow-auto rounded-xl border bg-card p-1 shadow-xl">
-                          {teamResults.map((team) => (
-                            <button
-                              key={team.id}
-                              onClick={() => {
-                                setSelectedTeam(team);
-                                setTeamResults([]);
-                                setTeamSearch(team.name);
-                              }}
-                              className="flex w-full items-center gap-3 rounded-lg p-3 text-left transition hover:bg-accent"
-                            >
-                              {team.logo_url ? (
-                                <img
-                                  src={team.logo_url}
-                                  alt=""
-                                  className="size-9 rounded-full object-contain"
-                                />
-                              ) : (
-                                <div className="grid size-9 place-items-center rounded-full border">
-                                  <Users className="size-4" />
-                                </div>
-                              )}
-                              <div>
-                                <p className="text-sm font-semibold">
-                                  {team.name}
-                                </p>
-                                {team.short_name && (
-                                  <p className="text-xs text-muted-foreground">
-                                    {team.short_name}
-                                  </p>
+                      {teamResults.length > 0 &&
+                        !selectedTeam && (
+                          <div className="absolute z-20 mt-2 max-h-64 w-full overflow-auto rounded-xl border bg-card p-1 shadow-xl">
+                            {teamResults.map((team) => (
+                              <button
+                                key={team.id}
+                                onClick={() => {
+                                  setSelectedTeam(team);
+                                  setTeamResults([]);
+                                  setTeamSearch(
+                                    team.name,
+                                  );
+                                }}
+                                className="flex w-full items-center gap-3 rounded-lg p-3 text-left transition hover:bg-accent"
+                              >
+                                {team.logo_url ? (
+                                  <img
+                                    src={team.logo_url}
+                                    alt=""
+                                    className="size-9 rounded-full object-contain"
+                                  />
+                                ) : (
+                                  <div className="grid size-9 place-items-center rounded-full border">
+                                    <Users className="size-4" />
+                                  </div>
                                 )}
-                              </div>
-                            </button>
-                          ))}
-                        </div>
-                      )}
+                                <div>
+                                  <p className="text-sm font-semibold">
+                                    {team.name}
+                                  </p>
+                                  {team.short_name && (
+                                    <p className="text-xs text-muted-foreground">
+                                      {
+                                        team.short_name
+                                      }
+                                    </p>
+                                  )}
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        )}
                     </div>
                     <select
                       value={selectedDivisionId}
                       onChange={(event) =>
-                        setSelectedDivisionId(event.target.value)
+                        setSelectedDivisionId(
+                          event.target.value,
+                        )
                       }
                       className="rounded-xl border bg-background px-3 py-3 text-sm outline-none"
                     >
-                      <option value="">Select division</option>
+                      <option value="">
+                        Select division
+                      </option>
                       {divisions.map((division) => (
-                        <option key={division.id} value={division.id}>
+                        <option
+                          key={division.id}
+                          value={division.id}
+                        >
                           {division.name} •{" "}
-                          {getTierLabel(division.tier)}
+                          {getTierLabel(
+                            division.tier,
+                          )}
                         </option>
                       ))}
                     </select>
@@ -1261,7 +1999,9 @@ function LeaguePanel() {
                         !selectedDivisionId ||
                         savingTeam
                       }
-                      onClick={() => void confirmTeam()}
+                      onClick={() =>
+                        void confirmTeam()
+                      }
                       className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {savingTeam && (
@@ -1279,8 +2019,9 @@ function LeaguePanel() {
                       </h2>
                       <p className="mt-1 text-sm text-muted-foreground">
                         {confirmedTeams.length} team
-                        {confirmedTeams.length === 1 ? "" : "s"} in this
-                        league.
+                        {confirmedTeams.length === 1
+                          ? ""
+                          : "s"} in this league.
                       </p>
                     </div>
                   </div>
@@ -1294,31 +2035,46 @@ function LeaguePanel() {
                                 {division.name}
                               </h3>
                               <span className="rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase">
-                                {getTierLabel(division.tier)}
+                                {getTierLabel(
+                                  division.tier,
+                                )}
                               </span>
                             </div>
                             <p className="text-xs text-muted-foreground">
-                              {teamsByDivision[division.id]?.length ?? 0}{" "}
+                              {
+                                teamsByDivision[
+                                  division.id
+                                ]?.length
+                              }{" "}
                               teams
                             </p>
                           </div>
                         </div>
                         <div className="grid gap-2">
-                          {(teamsByDivision[division.id] ?? []).map(
-                            (team) => (
-                              <TeamRow
-                                key={team.id}
-                                team={team}
-                                manager={getManagerName(team)}
-                                onRemove={() => void removeTeam(team)}
-                              />
-                            ),
-                          )}
                           {(
-                            teamsByDivision[division.id] ?? []
+                            teamsByDivision[
+                              division.id
+                            ] ?? []
+                          ).map((team) => (
+                            <TeamRow
+                              key={team.id}
+                              team={team}
+                              manager={getManagerName(
+                                team,
+                              )}
+                              onRemove={() =>
+                                void removeTeam(team)
+                              }
+                            />
+                          ))}
+                          {(
+                            teamsByDivision[
+                              division.id
+                            ] ?? []
                           ).length === 0 && (
                             <div className="rounded-xl border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
-                              No teams confirmed in this division.
+                              No teams confirmed in this
+                              division.
                             </div>
                           )}
                         </div>
@@ -1333,13 +2089,20 @@ function LeaguePanel() {
                         </h3>
                         <div className="grid gap-2">
                           {confirmedTeams
-                            .filter((team) => !team.division_id)
+                            .filter(
+                              (team) =>
+                                !team.division_id,
+                            )
                             .map((team) => (
                               <TeamRow
                                 key={team.id}
                                 team={team}
-                                manager={getManagerName(team)}
-                                onRemove={() => void removeTeam(team)}
+                                manager={getManagerName(
+                                  team,
+                                )}
+                                onRemove={() =>
+                                  void removeTeam(team)
+                                }
                               />
                             ))}
                         </div>
@@ -1356,23 +2119,29 @@ function LeaguePanel() {
                     Create division
                   </h2>
                   <p className="mt-2 text-sm text-muted-foreground">
-                    Create a new division for this league. NOVA supports
-                    three division levels: Elite, Tier 2 and Tier 3.
+                    Create a new division for this league. NOVA
+                    supports three division levels: Elite, Tier 2
+                    and Tier 3.
                   </p>
                   <div className="mt-5 grid gap-3 md:grid-cols-[1fr_auto]">
                     <input
                       value={newDivisionName}
                       onChange={(event) =>
-                        setNewDivisionName(event.target.value)
+                        setNewDivisionName(
+                          event.target.value,
+                        )
                       }
                       placeholder="Division name"
                       className="rounded-xl border bg-background px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/20"
                     />
                     <button
                       disabled={
-                        !newDivisionName.trim() || creatingDivision
+                        !newDivisionName.trim() ||
+                        creatingDivision
                       }
-                      onClick={() => void createDivision()}
+                      onClick={() =>
+                        void createDivision()
+                      }
                       className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50"
                     >
                       {creatingDivision ? (
@@ -1399,7 +2168,9 @@ function LeaguePanel() {
                       </h2>
                       <p className="mt-1 text-sm text-muted-foreground">
                         {divisions.length} division
-                        {divisions.length === 1 ? "" : "s"} configured.
+                        {divisions.length === 1
+                          ? ""
+                          : "s"} configured.
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -1416,61 +2187,159 @@ function LeaguePanel() {
                   <div className="mt-5 grid gap-3">
                     {divisions.map((division) => {
                       const count =
-                        teamsByDivision[division.id]?.length ?? 0;
+                        teamsByDivision[
+                          division.id
+                        ]?.length ?? 0;
+                      const divisionFixtureCount =
+                        fixtures.filter(
+                          (fixture) =>
+                            fixture.division_id ===
+                            division.id,
+                        ).length;
+                      const divisionCompletedCount =
+                        fixtures.filter(
+                          (fixture) =>
+                            fixture.division_id ===
+                              division.id &&
+                            fixture.status ===
+                              "completed",
+                        ).length;
                       return (
                         <div
                           key={division.id}
-                          className="flex flex-col gap-4 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between"
+                          className="rounded-xl border p-4"
                         >
-                          <div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <h3 className="font-bold">
-                                {division.name}
-                              </h3>
-                              {!canManageTiers && (
+                          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <h3 className="font-bold">
+                                  {division.name}
+                                </h3>
                                 <span className="rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase">
-                                  {getTierLabel(division.tier)}
+                                  {getTierLabel(
+                                    division.tier,
+                                  )}
                                 </span>
+                                <span className="rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase">
+                                  {division.status ??
+                                    "draft"}
+                                </span>
+                              </div>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                {count} team
+                                {count === 1
+                                  ? ""
+                                  : "s"} •{" "}
+                                {
+                                  divisionFixtureCount
+                                }{" "}
+                                fixtures •{" "}
+                                {
+                                  divisionCompletedCount
+                                }{" "}
+                                completed
+                              </p>
+                              {division.start_date && (
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  Started{" "}
+                                  {formatDate(
+                                    division.start_date,
+                                  )}
+                                </p>
+                              )}
+                              {division.ended_at && (
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  Ended{" "}
+                                  {formatDate(
+                                    division.ended_at,
+                                  )}
+                                </p>
                               )}
                             </div>
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              {count} team
-                              {count === 1 ? "" : "s"} •{" "}
-                              {division.status ?? "draft"}
-                            </p>
-                          </div>
-                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                            {canManageTiers && (
-                              <select
-                                value={division.tier ?? 1}
-                                onChange={(event) =>
-                                  void updateDivisionTier(
-                                    division,
-                                    Number(event.target.value),
-                                  )
-                                }
-                                disabled={saving}
-                                className="rounded-lg border bg-background px-3 py-2 text-sm font-semibold outline-none focus:ring-2 focus:ring-primary/20"
-                              >
-                                {TIER_OPTIONS.map((option) => (
-                                  <option
-                                    key={option.value}
-                                    value={option.value}
+                            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                              {canManageTiers && (
+                                <select
+                                  value={
+                                    division.tier ?? 1
+                                  }
+                                  onChange={(event) =>
+                                    void updateDivisionTier(
+                                      division,
+                                      Number(
+                                        event.target
+                                          .value,
+                                      ),
+                                    )
+                                  }
+                                  disabled={saving}
+                                  className="rounded-lg border bg-background px-3 py-2 text-sm font-semibold outline-none focus:ring-2 focus:ring-primary/20"
+                                >
+                                  {TIER_OPTIONS.map(
+                                    (option) => (
+                                      <option
+                                        key={
+                                          option.value
+                                        }
+                                        value={
+                                          option.value
+                                        }
+                                      >
+                                        {option.label}
+                                      </option>
+                                    ),
+                                  )}
+                                </select>
+                              )}
+                              {division.status !==
+                                "active" &&
+                                division.status !==
+                                  "ended" && (
+                                  <button
+                                    onClick={() =>
+                                      void startDivision(
+                                        division,
+                                      )
+                                    }
+                                    disabled={saving}
+                                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50"
                                   >
-                                    {option.label}
-                                  </option>
-                                ))}
-                              </select>
-                            )}
-                            <button
-                              onClick={() =>
-                                void deleteDivision(division)
-                              }
-                              className="inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold text-destructive transition hover:bg-destructive/10"
-                            >
-                              <Trash2 className="size-4" />
-                              Delete
-                            </button>
+                                    <Trophy className="size-4" />
+                                    Start Division
+                                  </button>
+                                )}
+                              {division.status ===
+                                "active" && (
+                                <button
+                                  onClick={() =>
+                                    void endDivision(
+                                      division,
+                                    )
+                                  }
+                                  disabled={saving}
+                                  className="inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold text-destructive transition hover:bg-destructive/10 disabled:opacity-50"
+                                >
+                                  <Lock className="size-4" />
+                                  End Division
+                                </button>
+                              )}
+                              {division.status !==
+                                "active" &&
+                                divisionFixtureCount ===
+                                  0 && (
+                                  <button
+                                    onClick={() =>
+                                      void deleteDivision(
+                                        division,
+                                      )
+                                    }
+                                    disabled={saving}
+                                    className="inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold text-destructive transition hover:bg-destructive/10 disabled:opacity-50"
+                                  >
+                                    <Trash2 className="size-4" />
+                                    Delete
+                                  </button>
+                                )}
+                            </div>
                           </div>
                         </div>
                       );
@@ -1481,6 +2350,67 @@ function LeaguePanel() {
                       </div>
                     )}
                   </div>
+                </div>
+                <div className="rounded-2xl border bg-card p-6">
+                  <div className="flex items-center gap-3">
+                    <CalendarDays className="size-5" />
+                    <div>
+                      <h2 className="font-bold">
+                        Competition schedule
+                      </h2>
+                      <p className="text-sm text-muted-foreground">
+                        Gameweeks run every{" "}
+                        {settings.gameweek_interval_days ??
+                          3}{" "}
+                        days. Fixtures receive a deadline
+                        automatically.
+                      </p>
+                    </div>
+                  </div>
+                  {gameweeks.length > 0 ? (
+                    <div className="mt-5 grid gap-2">
+                      {gameweeks.slice(0, 10).map(
+                        (gameweek) => (
+                          <button
+                            key={gameweek.id}
+                            onClick={() =>
+                              setSelectedGameweek(
+                                gameweek.number,
+                              )
+                            }
+                            className="flex items-center justify-between rounded-xl border p-4 text-left transition hover:bg-accent"
+                          >
+                            <div>
+                              <p className="font-semibold">
+                                Gameweek{" "}
+                                {gameweek.number}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                {
+                                  fixtures.filter(
+                                    (fixture) =>
+                                      fixture.gameweek ===
+                                      gameweek.number,
+                                  ).length
+                                }{" "}
+                                fixtures
+                              </p>
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              {formatDate(
+                                gameweek.starts_at,
+                              )}
+                            </p>
+                          </button>
+                        ),
+                      )}
+                    </div>
+                  ) : (
+                    <div className="mt-5 rounded-xl border border-dashed px-5 py-8 text-center text-sm text-muted-foreground">
+                      Gameweeks will appear here after a
+                      division is started.
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -1494,11 +2424,15 @@ function LeaguePanel() {
                     <Field
                       label="Maximum roster size"
                       type="number"
-                      value={String(settings.max_roster_size ?? 20)}
+                      value={String(
+                        settings.max_roster_size ??
+                          20,
+                      )}
                       onChange={(value) =>
                         setSettings((current) => ({
                           ...current,
-                          max_roster_size: Number(value),
+                          max_roster_size:
+                            Number(value),
                         }))
                       }
                     />
@@ -1506,19 +2440,23 @@ function LeaguePanel() {
                       label="Gameweek interval (days)"
                       type="number"
                       value={String(
-                        settings.gameweek_interval_days ?? 3,
+                        settings.gameweek_interval_days ??
+                          3,
                       )}
                       onChange={(value) =>
                         setSettings((current) => ({
                           ...current,
-                          gameweek_interval_days: Number(value),
+                          gameweek_interval_days:
+                            Number(value),
                         }))
                       }
                     />
                   </div>
                   <SaveButton
                     saving={saving}
-                    onClick={() => void saveLeagueSettings()}
+                    onClick={() =>
+                      void saveLeagueSettings()
+                    }
                   />
                 </SettingsCard>
                 <SettingsCard
@@ -1544,6 +2482,26 @@ function LeaguePanel() {
                     )}
                   </div>
                 </SettingsCard>
+                <div className="rounded-2xl border bg-card p-6">
+                  <div className="flex items-center gap-3">
+                    <Trophy className="size-5" />
+                    <div>
+                      <h2 className="font-bold">
+                        Competition rules
+                      </h2>
+                      <p className="text-sm text-muted-foreground">
+                        NOVA uses the league's configured
+                        gameweek interval when creating
+                        schedules.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                    <RuleCard title="Home & Away" />
+                    <RuleCard title="3 Day Gameweeks" />
+                    <RuleCard title="Deadline 0-0" />
+                  </div>
+                </div>
               </div>
             )}
             {activeSection === "transfers" && (
@@ -1557,23 +2515,29 @@ function LeaguePanel() {
                       label="Starting transfer budget"
                       type="number"
                       value={String(
-                        settings.default_transfer_budget ?? 0,
+                        settings.default_transfer_budget ??
+                          0,
                       )}
                       onChange={(value) =>
                         setSettings((current) => ({
                           ...current,
-                          default_transfer_budget: Number(value),
+                          default_transfer_budget:
+                            Number(value),
                         }))
                       }
                     />
                     <Field
                       label="Maximum roster size"
                       type="number"
-                      value={String(settings.max_roster_size ?? 20)}
+                      value={String(
+                        settings.max_roster_size ??
+                          20,
+                      )}
                       onChange={(value) =>
                         setSettings((current) => ({
                           ...current,
-                          max_roster_size: Number(value),
+                          max_roster_size:
+                            Number(value),
                         }))
                       }
                     />
@@ -1586,9 +2550,12 @@ function LeaguePanel() {
                       onChange={(value) =>
                         setSettings((current) => ({
                           ...current,
-                          transfer_window_start: value
-                            ? new Date(value).toISOString()
-                            : null,
+                          transfer_window_start:
+                            value
+                              ? new Date(
+                                  value,
+                                ).toISOString()
+                              : null,
                         }))
                       }
                     />
@@ -1601,16 +2568,21 @@ function LeaguePanel() {
                       onChange={(value) =>
                         setSettings((current) => ({
                           ...current,
-                          transfer_window_end: value
-                            ? new Date(value).toISOString()
-                            : null,
+                          transfer_window_end:
+                            value
+                              ? new Date(
+                                  value,
+                                ).toISOString()
+                              : null,
                         }))
                       }
                     />
                   </div>
                   <SaveButton
                     saving={saving}
-                    onClick={() => void saveLeagueSettings()}
+                    onClick={() =>
+                      void saveLeagueSettings()
+                    }
                   />
                 </SettingsCard>
                 <div className="rounded-2xl border bg-card p-6">
@@ -1619,10 +2591,13 @@ function LeaguePanel() {
                       <Wallet className="size-5" />
                     </div>
                     <div>
-                      <h2 className="font-bold">Transfer rules</h2>
+                      <h2 className="font-bold">
+                        Transfer rules
+                      </h2>
                       <p className="text-sm text-muted-foreground">
-                        The underlying transfer, loan and release rules
-                        can be enforced by NOVA's transfer system.
+                        The underlying transfer, loan and
+                        release rules can be enforced by
+                        NOVA's transfer system.
                       </p>
                     </div>
                   </div>
@@ -1646,9 +2621,11 @@ function LeaguePanel() {
                         No Discord server connected
                       </p>
                       <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                        Run <strong>/setup</strong> in the Discord server
-                        for this league first. Once the server is
-                        connected, you can select the Manager and
+                        Run{" "}
+                        <strong>/setup</strong> in the
+                        league's Discord server first.
+                        Once the server is connected, you
+                        can select the Manager and
                         Co-Manager roles here.
                       </p>
                     </div>
@@ -1663,19 +2640,23 @@ function LeaguePanel() {
                             guildSettings.guild_id}
                         </p>
                         <p className="mt-1 text-xs text-muted-foreground">
-                          Discord roles and channels are synced
-                          automatically from this server.
+                          Discord roles and channels are
+                          synced automatically from this
+                          server.
                         </p>
                       </div>
-                      {selectableDiscordRoles.length === 0 ? (
+                      {selectableDiscordRoles.length ===
+                      0 ? (
                         <div className="mt-5 rounded-xl border border-dashed bg-background p-5">
                           <p className="font-semibold">
                             No Discord roles available yet
                           </p>
                           <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                            NOVA has not received the server's Discord
-                            roles yet. Make sure the NOVA bot is in the
-                            server and deployed, then refresh this page.
+                            NOVA has not received the
+                            server's Discord roles yet.
+                            Make sure the NOVA bot is in
+                            the server and deployed, then
+                            refresh this page.
                           </p>
                         </div>
                       ) : (
@@ -1696,18 +2677,26 @@ function LeaguePanel() {
                           </div>
                           <div className="mt-5 rounded-xl border border-dashed bg-background p-4">
                             <p className="text-sm font-semibold">
-                              Used by the NOVA transfer system
+                              Used by the NOVA transfer
+                              system
                             </p>
                             <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                              These roles control access to commands such
-                              as /sign, /release, /transfer and /loan.
-                              The bot will also verify that the manager or
-                              co-manager belongs to the relevant club.
+                              These roles control access
+                              to commands such as
+                              /sign, /release, /transfer
+                              and /loan. The bot will
+                              also verify that the manager
+                              or co-manager belongs to the
+                              relevant club.
                             </p>
                           </div>
                           <button
-                            onClick={() => void saveDiscordRoles()}
-                            disabled={savingDiscordRoles}
+                            onClick={() =>
+                              void saveDiscordRoles()
+                            }
+                            disabled={
+                              savingDiscordRoles
+                            }
                             className="mt-5 inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50"
                           >
                             {savingDiscordRoles ? (
@@ -1732,19 +2721,22 @@ function LeaguePanel() {
                         No Discord server connected
                       </p>
                       <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                        Run <strong>/setup</strong> in the league's
-                        Discord server first.
+                        Run{" "}
+                        <strong>/setup</strong> in the
+                        league's Discord server first.
                       </p>
                     </div>
-                  ) : selectableDiscordChannels.length === 0 ? (
+                  ) : selectableDiscordChannels.length ===
+                    0 ? (
                     <div className="rounded-xl border border-dashed bg-background p-5">
                       <p className="font-semibold">
                         No Discord channels available yet
                       </p>
                       <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                        NOVA has not received the server's channels yet.
-                        Make sure the NOVA bot is in the server and
-                        deployed, then refresh this page.
+                        NOVA has not received the server's
+                        channels yet. Make sure the NOVA
+                        bot is in the server and deployed,
+                        then refresh this page.
                       </p>
                     </div>
                   ) : (
@@ -1796,14 +2788,18 @@ function LeaguePanel() {
                           Discord channel picker
                         </p>
                         <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                          These dropdowns are populated automatically from
-                          the connected Discord server. NOVA only shows
-                          selectable channel types and stores the selected
-                          Discord channel IDs behind the scenes.
+                          These dropdowns are populated
+                          automatically from the connected
+                          Discord server. NOVA only shows
+                          selectable channel types and
+                          stores the selected Discord
+                          channel IDs behind the scenes.
                         </p>
                       </div>
                       <button
-                        onClick={() => void saveChannels()}
+                        onClick={() =>
+                          void saveChannels()
+                        }
                         disabled={saving}
                         className="mt-5 inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50"
                       >
@@ -1820,9 +2816,10 @@ function LeaguePanel() {
                     Global announcements
                   </h2>
                   <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                    The configured Announcements Channel receives
-                    NOVA-wide announcements. Only NOVA Admin can actually
-                    send global announcements.
+                    The configured Announcements Channel
+                    receives NOVA-wide announcements. Only NOVA
+                    Admin can actually send global
+                    announcements.
                   </p>
                 </div>
               </div>
@@ -1855,18 +2852,24 @@ function LeaguePanel() {
                               <Shield className="size-4" />
                             </div>
                             <div>
-                              <p className="font-semibold">{name}</p>
+                              <p className="font-semibold">
+                                {name}
+                              </p>
                               <p className="text-xs text-muted-foreground">
-                                {member.role === "overseer"
+                                {member.role ===
+                                "overseer"
                                   ? "League Overseer"
                                   : "Co-Overseer"}
                               </p>
                             </div>
                           </div>
-                          {member.role === "co_overseer" && (
+                          {member.role ===
+                            "co_overseer" && (
                             <button
                               onClick={() =>
-                                void removeCoOverseer(member)
+                                void removeCoOverseer(
+                                  member,
+                                )
                               }
                               className="rounded-lg border p-2 text-destructive transition hover:bg-destructive/10"
                               title="Remove Co-Overseer"
@@ -1887,7 +2890,9 @@ function LeaguePanel() {
                     <input
                       value={newCoOverseer}
                       onChange={(event) =>
-                        void searchMembers(event.target.value)
+                        void searchMembers(
+                          event.target.value,
+                        )
                       }
                       placeholder="Search username or display name..."
                       className="w-full rounded-xl border bg-background px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/20"
@@ -1897,31 +2902,38 @@ function LeaguePanel() {
                     )}
                     {memberSearchResults.length > 0 && (
                       <div className="absolute z-20 mt-2 max-h-64 w-full overflow-auto rounded-xl border bg-card p-1 shadow-xl">
-                        {memberSearchResults.map((profile) => (
-                          <button
-                            key={profile.id}
-                            onClick={() =>
-                              void addCoOverseer(profile)
-                            }
-                            className="flex w-full items-center gap-3 rounded-lg p-3 text-left transition hover:bg-accent"
-                          >
-                            <div className="grid size-9 place-items-center rounded-full border">
-                              <Users className="size-4" />
-                            </div>
-                            <div>
-                              <p className="text-sm font-semibold">
-                                {profile.display_name ||
-                                  profile.username ||
-                                  "User"}
-                              </p>
-                              {profile.username && (
-                                <p className="text-xs text-muted-foreground">
-                                  @{profile.username}
+                        {memberSearchResults.map(
+                          (profile) => (
+                            <button
+                              key={profile.id}
+                              onClick={() =>
+                                void addCoOverseer(
+                                  profile,
+                                )
+                              }
+                              className="flex w-full items-center gap-3 rounded-lg p-3 text-left transition hover:bg-accent"
+                            >
+                              <div className="grid size-9 place-items-center rounded-full border">
+                                <Users className="size-4" />
+                              </div>
+                              <div>
+                                <p className="text-sm font-semibold">
+                                  {profile.display_name ||
+                                    profile.username ||
+                                    "User"}
                                 </p>
-                              )}
-                            </div>
-                          </button>
-                        ))}
+                                {profile.username && (
+                                  <p className="text-xs text-muted-foreground">
+                                    @
+                                    {
+                                      profile.username
+                                    }
+                                  </p>
+                                )}
+                              </div>
+                            </button>
+                          ),
+                        )}
                       </div>
                     )}
                   </div>
@@ -1931,18 +2943,19 @@ function LeaguePanel() {
                     Permission boundary
                   </h2>
                   <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                    League Overseers and Co-Overseers only manage this
-                    league. They do not receive NOVA-wide administrator
-                    permissions.
+                    League Overseers and Co-Overseers only
+                    manage this league. They do not receive
+                    NOVA-wide administrator permissions.
                   </p>
                   <div className="mt-5 rounded-xl border bg-background p-4">
                     <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                       Division tier authority
                     </p>
                     <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                      Only NOVA Admins and the NOVA Owner can assign or
-                      change division tiers. The available levels are
-                      Elite, Tier 2 and Tier 3.
+                      Only NOVA Admins and the NOVA Owner can
+                      assign or change division tiers. The
+                      available levels are Elite, Tier 2 and
+                      Tier 3.
                     </p>
                   </div>
                 </div>
@@ -1971,7 +2984,27 @@ function StatCard({
         </span>
         {icon}
       </div>
-      <p className="mt-4 text-3xl font-bold">{value}</p>
+      <p className="mt-4 text-3xl font-bold">
+        {value}
+      </p>
+    </div>
+  );
+}
+function MiniStat({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | number;
+}) {
+  return (
+    <div className="rounded-xl border bg-background p-4">
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {label}
+      </p>
+      <p className="mt-2 text-2xl font-bold">
+        {value}
+      </p>
     </div>
   );
 }
@@ -2036,6 +3069,161 @@ function TeamRow({
     </div>
   );
 }
+function FixtureRow({
+  fixture,
+  homeTeam,
+  awayTeam,
+}: {
+  fixture: Fixture;
+  homeTeam?: Team;
+  awayTeam?: Team;
+}) {
+  const completed =
+    fixture.status === "completed";
+  const overdue =
+    isFixtureOverdue(fixture);
+  return (
+    <div className="rounded-xl border p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-semibold">
+            {homeTeam?.name ?? "Home"}{" "}
+            <span className="text-muted-foreground">
+              vs
+            </span>{" "}
+            {awayTeam?.name ?? "Away"}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            GW {fixture.gameweek ?? "?"} •{" "}
+            {formatDate(fixture.kickoff_at)}
+          </p>
+        </div>
+        {completed ? (
+          <div className="text-right">
+            <p className="text-lg font-bold">
+              {fixture.home_score ?? 0} -{" "}
+              {fixture.away_score ?? 0}
+            </p>
+            <p className="text-[10px] font-semibold uppercase text-muted-foreground">
+              Completed
+            </p>
+          </div>
+        ) : (
+          <div className="text-right">
+            <p className="text-xs font-semibold">
+              {overdue
+                ? "Deadline passed"
+                : "Scheduled"}
+            </p>
+            {fixture.deadline_at && (
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                Deadline{" "}
+                {formatDate(
+                  fixture.deadline_at,
+                )}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+function StandingTable({
+  rows,
+  teamsById,
+  adjustments,
+}: {
+  rows: Standing[];
+  teamsById: Record<string, Team>;
+  adjustments: PointAdjustment[];
+}) {
+  return (
+    <div className="mt-5 overflow-hidden rounded-xl border">
+      <div className="grid grid-cols-[34px_minmax(0,1fr)_repeat(7,42px)] gap-2 border-b bg-background px-3 py-3 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <span>#</span>
+        <span>Team</span>
+        <span className="text-center">P</span>
+        <span className="text-center">W</span>
+        <span className="text-center">D</span>
+        <span className="text-center">L</span>
+        <span className="text-center">GD</span>
+        <span className="text-center">Adj</span>
+        <span className="text-center">Pts</span>
+      </div>
+      {rows.map((row, index) => {
+        const team = teamsById[row.team_id];
+        const adjustment = adjustments
+          .filter(
+            (item) =>
+              item.team_id === row.team_id,
+          )
+          .reduce(
+            (total, item) =>
+              total + item.points_delta,
+            0,
+          );
+        return (
+          <div
+            key={row.id}
+            className="grid grid-cols-[34px_minmax(0,1fr)_repeat(7,42px)] items-center gap-2 border-b px-3 py-3 last:border-b-0"
+          >
+            <span className="text-xs font-semibold text-muted-foreground">
+              {index + 1}
+            </span>
+            <div className="flex min-w-0 items-center gap-2">
+              {team?.logo_url ? (
+                <img
+                  src={team.logo_url}
+                  alt=""
+                  className="size-7 rounded-full object-contain"
+                />
+              ) : (
+                <div className="grid size-7 place-items-center rounded-full border">
+                  <Users className="size-3" />
+                </div>
+              )}
+              <span className="truncate text-sm font-semibold">
+                {team?.name ?? "Unknown team"}
+              </span>
+            </div>
+            <span className="text-center text-xs">
+              {row.played}
+            </span>
+            <span className="text-center text-xs">
+              {row.won}
+            </span>
+            <span className="text-center text-xs">
+              {row.drawn}
+            </span>
+            <span className="text-center text-xs">
+              {row.lost}
+            </span>
+            <span className="text-center text-xs">
+              {row.goal_difference}
+            </span>
+            <span
+              className={`text-center text-xs font-semibold ${
+                adjustment < 0
+                  ? "text-destructive"
+                  : adjustment > 0
+                    ? "text-primary"
+                    : "text-muted-foreground"
+              }`}
+            >
+              {adjustment > 0
+                ? `+${adjustment}`
+                : adjustment}
+            </span>
+            <span className="text-center text-sm font-bold">
+              {row.points}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 function SettingsCard({
   title,
   description,
@@ -2047,11 +3235,15 @@ function SettingsCard({
 }) {
   return (
     <div className="rounded-2xl border bg-card p-6">
-      <h2 className="text-xl font-bold">{title}</h2>
+      <h2 className="text-xl font-bold">
+        {title}
+      </h2>
       <p className="mt-2 text-sm leading-6 text-muted-foreground">
         {description}
       </p>
-      <div className="mt-6">{children}</div>
+      <div className="mt-6">
+        {children}
+      </div>
     </div>
   );
 }
@@ -2068,11 +3260,15 @@ function Field({
 }) {
   return (
     <div>
-      <label className="text-sm font-semibold">{label}</label>
+      <label className="text-sm font-semibold">
+        {label}
+      </label>
       <input
         type={type}
         value={value}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={(event) =>
+          onChange(event.target.value)
+        }
         className="mt-2 w-full rounded-xl border bg-background px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/20"
       />
     </div>
@@ -2100,23 +3296,37 @@ function SaveButton({
     </button>
   );
 }
-function RuleCard({ title }: { title: string }) {
+function RuleCard({
+  title,
+}: {
+  title: string;
+}) {
   return (
     <div className="rounded-xl border p-4">
-      <p className="font-semibold">{title}</p>
+      <p className="font-semibold">
+        {title}
+      </p>
       <p className="mt-1 text-xs text-muted-foreground">
         Managed by NOVA's league rules.
       </p>
     </div>
   );
 }
-function toDateTimeLocal(value: string | null) {
+function toDateTimeLocal(
+  value: string | null,
+) {
   if (!value) return "";
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const offset = date.getTimezoneOffset();
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  const offset =
+    date.getTimezoneOffset();
   const localDate = new Date(
-    date.getTime() - offset * 60 * 1000,
+    date.getTime() -
+      offset * 60 * 1000,
   );
-  return localDate.toISOString().slice(0, 16);
+  return localDate
+    .toISOString()
+    .slice(0, 16);
 }
