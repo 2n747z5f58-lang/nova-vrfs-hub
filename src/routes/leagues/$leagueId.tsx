@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { FavouriteButton } from "@/components/nova/FavouriteButton";
+type Tab = "overview" | "table" | "fixtures" | "results";
 type League = {
   id: string;
   name: string;
@@ -20,8 +21,8 @@ type Division = {
   name: string;
   league_id: string;
   season: string | null;
-  tier?: number | null;
-  status?: string | null;
+  tier: number | null;
+  status: string | null;
 };
 type Team = {
   id: string;
@@ -40,7 +41,7 @@ type Standing = {
   goals_against: number;
   goal_difference: number;
   points: number;
-  team?: Team | null;
+  team: Team | null;
 };
 type Gameweek = {
   id: string;
@@ -62,14 +63,8 @@ type Fixture = {
   competition: string | null;
   completed_at: string | null;
   deadline_at: string | null;
-  home_team?: Team | null;
-  away_team?: Team | null;
-};
-type DivisionSection = {
-  division: Division;
-  standings: Standing[];
-  fixtures: Fixture[];
-  gameweeks: Gameweek[];
+  home_team: Team | null;
+  away_team: Team | null;
 };
 export const Route = createFileRoute("/leagues/$leagueId")({
   component: LeagueDetail,
@@ -81,46 +76,47 @@ function LeagueDetail() {
   const [standings, setStandings] = useState<Standing[]>([]);
   const [fixtures, setFixtures] = useState<Fixture[]>([]);
   const [gameweeks, setGameweeks] = useState<Gameweek[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
   const [selectedDivisionId, setSelectedDivisionId] = useState("");
   const [selectedGameweek, setSelectedGameweek] = useState<number | null>(
     null,
   );
+  const [tab, setTab] = useState<Tab>("overview");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   useEffect(() => {
     async function loadLeague() {
       setLoading(true);
       setError("");
-      const { data: leagueData, error: leagueError } = await supabase
+      const leagueResponse = await supabase
         .from("leagues")
         .select("id,name,slug,status")
         .eq("id", leagueId)
         .maybeSingle();
-      if (leagueError) {
-        console.error("Failed to load league:", leagueError);
+      if (leagueResponse.error) {
+        console.error(leagueResponse.error);
         setError("Couldn't load this league.");
         setLoading(false);
         return;
       }
-      if (!leagueData) {
+      if (!leagueResponse.data) {
         setError("League not found.");
         setLoading(false);
         return;
       }
-      setLeague(leagueData as League);
-      const { data: divisionData, error: divisionError } = await supabase
+      setLeague(leagueResponse.data as League);
+      const divisionResponse = await supabase
         .from("divisions")
         .select("id,name,league_id,season,tier,status")
         .eq("league_id", leagueId)
         .order("tier", { ascending: true })
         .order("name", { ascending: true });
-      if (divisionError) {
-        console.error("Failed to load divisions:", divisionError);
-        setError("Couldn't load the divisions for this league.");
+      if (divisionResponse.error) {
+        console.error(divisionResponse.error);
+        setError("Couldn't load this league's divisions.");
         setLoading(false);
         return;
       }
-      const loadedDivisions = (divisionData ?? []) as Division[];
+      const loadedDivisions = (divisionResponse.data ?? []) as Division[];
       setDivisions(loadedDivisions);
       if (loadedDivisions.length === 0) {
         setStandings([]);
@@ -130,7 +126,7 @@ function LeagueDetail() {
         return;
       }
       const divisionIds = loadedDivisions.map((division) => division.id);
-      const [standingResponse, fixtureResponse, gameweekResponse] =
+      const [standingsResponse, fixturesResponse, gameweeksResponse] =
         await Promise.all([
           supabase
             .from("standings")
@@ -195,99 +191,98 @@ function LeagueDetail() {
             .in("division_id", divisionIds)
             .order("number", { ascending: true }),
         ]);
-      if (standingResponse.error) {
-        console.error(
-          "Failed to load standings:",
-          standingResponse.error,
-        );
-        setError("Couldn't load the league standings.");
+      if (standingsResponse.error) {
+        console.error(standingsResponse.error);
+        setError("Couldn't load the standings.");
         setLoading(false);
         return;
       }
-      if (fixtureResponse.error) {
-        console.error(
-          "Failed to load fixtures:",
-          fixtureResponse.error,
-        );
-        setError("Couldn't load the league fixtures.");
+      if (fixturesResponse.error) {
+        console.error(fixturesResponse.error);
+        setError("Couldn't load the fixtures.");
         setLoading(false);
         return;
       }
-      if (gameweekResponse.error) {
-        console.error(
-          "Failed to load gameweeks:",
-          gameweekResponse.error,
-        );
-        setError("Couldn't load the league gameweeks.");
+      if (gameweeksResponse.error) {
+        console.error(gameweeksResponse.error);
+        setError("Couldn't load the gameweeks.");
         setLoading(false);
         return;
       }
-      const loadedStandings = (standingResponse.data ??
-        []) as Standing[];
-      const loadedFixtures = (fixtureResponse.data ??
-        []) as Fixture[];
-      const loadedGameweeks = (gameweekResponse.data ??
-        []) as Gameweek[];
-      setStandings(loadedStandings);
-      setFixtures(loadedFixtures);
-      setGameweeks(loadedGameweeks);
-      if (!selectedDivisionId && loadedDivisions.length > 0) {
-        setSelectedDivisionId(loadedDivisions[0].id);
+      setStandings((standingsResponse.data ?? []) as Standing[]);
+      setFixtures((fixturesResponse.data ?? []) as Fixture[]);
+      setGameweeks((gameweeksResponse.data ?? []) as Gameweek[]);
+      if (loadedDivisions.length > 0) {
+        setSelectedDivisionId((current) =>
+          current || loadedDivisions[0].id,
+        );
       }
       setLoading(false);
     }
     void loadLeague();
-  }, [leagueId, selectedDivisionId]);
+  }, [leagueId]);
   const selectedDivision =
     divisions.find((division) => division.id === selectedDivisionId) ??
     divisions[0] ??
     null;
-  const selectedDivisionFixtures = useMemo(() => {
+  const divisionStandings = useMemo(() => {
     if (!selectedDivision) return [];
-    return fixtures.filter(
-      (fixture) => fixture.division_id === selectedDivision.id,
-    );
-  }, [fixtures, selectedDivision]);
-  const selectedDivisionStandings = useMemo(() => {
-    if (!selectedDivision) return [];
-    return standings.filter(
-      (standing) => standing.division_id === selectedDivision.id,
-    );
+    return standings
+      .filter((standing) => standing.division_id === selectedDivision.id)
+      .sort((a, b) => {
+        if (b.points !== a.points) return b.points - a.points;
+        if (b.goal_difference !== a.goal_difference) {
+          return b.goal_difference - a.goal_difference;
+        }
+        return b.goals_for - a.goals_for;
+      });
   }, [standings, selectedDivision]);
-  const selectedDivisionGameweeks = useMemo(() => {
+  const divisionFixtures = useMemo(() => {
+    if (!selectedDivision) return [];
+    return fixtures
+      .filter((fixture) => fixture.division_id === selectedDivision.id)
+      .sort(
+        (a, b) =>
+          new Date(a.kickoff_at).getTime() -
+          new Date(b.kickoff_at).getTime(),
+      );
+  }, [fixtures, selectedDivision]);
+  const divisionGameweeks = useMemo(() => {
     if (!selectedDivision) return [];
     return gameweeks.filter(
       (gameweek) => gameweek.division_id === selectedDivision.id,
     );
   }, [gameweeks, selectedDivision]);
-  const filteredFixtures = useMemo(() => {
-    if (selectedGameweek === null) {
-      return selectedDivisionFixtures;
-    }
-    return selectedDivisionFixtures.filter(
-      (fixture) => fixture.gameweek === selectedGameweek,
-    );
-  }, [selectedDivisionFixtures, selectedGameweek]);
   const completedFixtures = useMemo(
     () =>
-      selectedDivisionFixtures.filter(
+      divisionFixtures.filter(
         (fixture) =>
           fixture.status === "completed" ||
           fixture.completed_at !== null ||
-          (fixture.home_score !== null &&
-            fixture.away_score !== null),
+          (fixture.home_score !== null && fixture.away_score !== null),
       ),
-    [selectedDivisionFixtures],
+    [divisionFixtures],
   );
   const upcomingFixtures = useMemo(
     () =>
-      selectedDivisionFixtures.filter(
+      divisionFixtures.filter(
         (fixture) =>
           fixture.status !== "completed" &&
-          fixture.completed_at === null,
+          fixture.completed_at === null &&
+          (fixture.home_score === null || fixture.away_score === null),
       ),
-    [selectedDivisionFixtures],
+    [divisionFixtures],
   );
+  const filteredFixtures = useMemo(() => {
+    if (selectedGameweek === null) return divisionFixtures;
+    return divisionFixtures.filter(
+      (fixture) => fixture.gameweek === selectedGameweek,
+    );
+  }, [divisionFixtures, selectedGameweek]);
+  function changeDivision(divisionId: string) {
+    setSelectedDivisionId(divisionId);
+    setSelectedGameweek(null);
+  }
   if (loading) {
     return (
       <main className="min-h-screen bg-background px-4 py-8 md:px-8">
@@ -312,7 +307,7 @@ function LeagueDetail() {
             </p>
             <Link
               to="/leagues"
-              className="mt-5 inline-block text-sm font-medium underline"
+              className="mt-5 inline-block text-sm font-semibold underline"
             >
               Back to leagues
             </Link>
@@ -321,6 +316,15 @@ function LeagueDetail() {
       </main>
     );
   }
+  const tierLabel = (() => {
+    const tiers = divisions
+      .map((division) => division.tier)
+      .filter((tier): tier is number => tier !== null);
+    const unique = [...new Set(tiers)];
+    if (unique.length === 0) return "No tier";
+    if (unique.length === 1) return `Tier ${unique[0]}`;
+    return `Tiers ${Math.min(...unique)}-${Math.max(...unique)}`;
+  })();
   return (
     <main className="min-h-screen bg-background px-4 py-8 text-foreground md:px-8">
       <div className="mx-auto max-w-6xl">
@@ -332,31 +336,34 @@ function LeagueDetail() {
           Back to leagues
         </Link>
         <header className="mb-8">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-            Competition
-          </p>
-          <div className="mt-3 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <h1 className="text-4xl font-bold tracking-tight">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                Competition
+              </p>
+              <h1 className="mt-2 text-4xl font-bold tracking-tight">
                 {league.name}
               </h1>
-              {league.slug && (
-                <p className="mt-2 text-sm text-muted-foreground">
-                  {league.slug}
-                </p>
-              )}
-            </div>
-            <div className="flex flex-wrap items-center gap-3">
-              {league.status && (
-                <span className="rounded-full border px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  {league.status}
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <span className="rounded-full border px-3 py-1 text-xs font-semibold">
+                  {tierLabel}
                 </span>
-              )}
-              <FavouriteButton
-                itemType="league"
-                itemId={league.id}
-              />
+                {league.status && (
+                  <span className="rounded-full border px-3 py-1 text-xs font-semibold uppercase text-muted-foreground">
+                    {league.status}
+                  </span>
+                )}
+                {league.slug && (
+                  <span className="text-xs text-muted-foreground">
+                    {league.slug}
+                  </span>
+                )}
+              </div>
             </div>
+            <FavouriteButton
+              itemType="league"
+              itemId={league.id}
+            />
           </div>
         </header>
         {divisions.length === 0 ? (
@@ -371,18 +378,15 @@ function LeagueDetail() {
           </section>
         ) : (
           <>
-            <div className="mb-8 flex flex-wrap gap-2">
+            <div className="mb-6 flex flex-wrap gap-2">
               {divisions.map((division) => {
                 const active = division.id === selectedDivision?.id;
                 return (
                   <button
                     key={division.id}
                     type="button"
-                    onClick={() => {
-                      setSelectedDivisionId(division.id);
-                      setSelectedGameweek(null);
-                    }}
-                    className={`rounded-lg border px-4 py-2 text-sm font-medium transition ${
+                    onClick={() => changeDivision(division.id)}
+                    className={`rounded-lg border px-4 py-2 text-sm font-semibold transition ${
                       active
                         ? "bg-foreground text-background"
                         : "bg-card hover:bg-muted"
@@ -394,235 +398,146 @@ function LeagueDetail() {
               })}
             </div>
             {selectedDivision && (
-              <div className="space-y-10">
-                <section>
-                  <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <>
+                <div className="mb-8 rounded-xl border bg-card p-5">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                     <div>
-                      <div className="flex items-center gap-2">
-                        <Trophy className="size-5" />
-                        <h2 className="text-2xl font-bold">
-                          {selectedDivision.name}
-                        </h2>
-                      </div>
+                      <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                        Division
+                      </p>
+                      <h2 className="mt-1 text-2xl font-bold">
+                        {selectedDivision.name}
+                      </h2>
                       {selectedDivision.season && (
                         <p className="mt-1 text-sm text-muted-foreground">
                           {selectedDivision.season}
                         </p>
                       )}
                     </div>
-                    <div className="flex gap-5 text-sm text-muted-foreground">
-                      <span>
-                        {upcomingFixtures.length} upcoming
-                      </span>
-                      <span>
-                        {completedFixtures.length} results
-                      </span>
+                    <div className="text-sm text-muted-foreground">
+                      {divisionStandings.length} teams
                     </div>
                   </div>
-                  <div className="grid gap-4 sm:grid-cols-3">
-                    <StatCard
-                      icon={<CalendarDays className="size-5" />}
-                      label="Fixtures"
-                      value={String(selectedDivisionFixtures.length)}
-                    />
-                    <StatCard
-                      icon={<Trophy className="size-5" />}
-                      label="Results"
-                      value={String(completedFixtures.length)}
-                    />
-                    <StatCard
-                      icon={<Clock3 className="size-5" />}
-                      label="Gameweeks"
-                      value={String(selectedDivisionGameweeks.length)}
-                    />
-                  </div>
-                </section>
-                <section>
-                  <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <h2 className="text-xl font-bold">
-                        Fixtures & Results
-                      </h2>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        Every fixture generated for this division is
-                        available here.
-                      </p>
-                    </div>
-                    {selectedDivisionGameweeks.length > 0 && (
-                      <div className="relative">
-                        <select
-                          value={
-                            selectedGameweek === null
-                              ? "all"
-                              : String(selectedGameweek)
-                          }
-                          onChange={(event) => {
-                            const value = event.target.value;
-                            setSelectedGameweek(
-                              value === "all"
-                                ? null
-                                : Number(value),
-                            );
-                          }}
-                          className="appearance-none rounded-lg border bg-card py-2 pl-3 pr-9 text-sm font-medium outline-none"
-                        >
-                          <option value="all">
-                            All Gameweeks
-                          </option>
-                          {selectedDivisionGameweeks.map((gameweek) => (
-                            <option
-                              key={gameweek.id}
-                              value={gameweek.number}
-                            >
-                              Gameweek {gameweek.number}
-                            </option>
-                          ))}
-                        </select>
-                        <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2" />
-                      </div>
+                </div>
+                <div className="mb-8 grid grid-cols-2 gap-3 md:grid-cols-4">
+                  <StatCard
+                    icon={<Trophy className="size-5" />}
+                    label="Teams"
+                    value={String(divisionStandings.length)}
+                  />
+                  <StatCard
+                    icon={<CalendarDays className="size-5" />}
+                    label="Fixtures"
+                    value={String(divisionFixtures.length)}
+                  />
+                  <StatCard
+                    icon={<Clock3 className="size-5" />}
+                    label="Upcoming"
+                    value={String(upcomingFixtures.length)}
+                  />
+                  <StatCard
+                    icon={<Trophy className="size-5" />}
+                    label="Results"
+                    value={String(completedFixtures.length)}
+                  />
+                </div>
+                <div className="mb-6 flex overflow-x-auto border-b">
+                  <TabButton
+                    active={tab === "overview"}
+                    onClick={() => setTab("overview")}
+                  >
+                    Overview
+                  </TabButton>
+                  <TabButton
+                    active={tab === "table"}
+                    onClick={() => setTab("table")}
+                  >
+                    Table
+                  </TabButton>
+                  <TabButton
+                    active={tab === "fixtures"}
+                    onClick={() => setTab("fixtures")}
+                  >
+                    Fixtures
+                  </TabButton>
+                  <TabButton
+                    active={tab === "results"}
+                    onClick={() => setTab("results")}
+                  >
+                    Results
+                  </TabButton>
+                </div>
+                {tab === "overview" && (
+                  <Overview
+                    upcomingFixtures={upcomingFixtures.slice(0, 5)}
+                    completedFixtures={completedFixtures
+                      .slice()
+                      .reverse()
+                      .slice(0, 5)}
+                  />
+                )}
+                {tab === "table" && (
+                  <StandingsTable standings={divisionStandings} />
+                )}
+                {tab === "fixtures" && (
+                  <FixtureList
+                    fixtures={filteredFixtures.filter(
+                      (fixture) =>
+                        fixture.status !== "completed" &&
+                        fixture.completed_at === null &&
+                        (fixture.home_score === null ||
+                          fixture.away_score === null),
                     )}
-                  </div>
-                  {filteredFixtures.length === 0 ? (
-                    <div className="rounded-xl border bg-card px-6 py-12 text-center">
-                      <CalendarDays className="mx-auto size-8 text-muted-foreground" />
-                      <h3 className="mt-3 font-semibold">
-                        No fixtures yet
-                      </h3>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        Fixtures will appear here once the division is
-                        started.
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="overflow-hidden rounded-xl border bg-card">
-                      <div className="divide-y">
-                        {filteredFixtures.map((fixture) => (
-                          <FixtureRow
-                            key={fixture.id}
-                            fixture={fixture}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </section>
-                <section>
-                  <div className="mb-4">
-                    <h2 className="text-xl font-bold">Table</h2>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Current standings for {selectedDivision.name}.
-                    </p>
-                  </div>
-                  {selectedDivisionStandings.length === 0 ? (
-                    <div className="rounded-xl border bg-card px-6 py-10 text-center">
-                      <p className="text-sm text-muted-foreground">
-                        No standings available yet.
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="overflow-x-auto rounded-xl border bg-card">
-                      <table className="w-full min-w-[700px] text-sm">
-                        <thead className="border-b bg-muted/40">
-                          <tr className="text-left text-xs uppercase tracking-wide text-muted-foreground">
-                            <th className="px-4 py-3">#</th>
-                            <th className="px-4 py-3">Team</th>
-                            <th className="px-4 py-3 text-center">
-                              P
-                            </th>
-                            <th className="px-4 py-3 text-center">
-                              W
-                            </th>
-                            <th className="px-4 py-3 text-center">
-                              D
-                            </th>
-                            <th className="px-4 py-3 text-center">
-                              L
-                            </th>
-                            <th className="px-4 py-3 text-center">
-                              GF
-                            </th>
-                            <th className="px-4 py-3 text-center">
-                              GA
-                            </th>
-                            <th className="px-4 py-3 text-center">
-                              GD
-                            </th>
-                            <th className="px-4 py-3 text-center">
-                              Pts
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {selectedDivisionStandings.map(
-                            (standing, index) => (
-                              <tr
-                                key={standing.id}
-                                className="border-b last:border-b-0"
-                              >
-                                <td className="px-4 py-4 font-semibold">
-                                  {index + 1}
-                                </td>
-                                <td className="px-4 py-4">
-                                  <Link
-                                    to="/teams/$teamId"
-                                    params={{
-                                      teamId: standing.team_id,
-                                    }}
-                                    className="flex items-center gap-3 transition hover:opacity-70"
-                                  >
-                                    {standing.team?.logo_url ? (
-                                      <img
-                                        src={standing.team.logo_url}
-                                        alt=""
-                                        className="size-8 object-contain"
-                                      />
-                                    ) : (
-                                      <div className="size-8 rounded-full border" />
-                                    )}
-                                    <span className="font-medium">
-                                      {standing.team?.name ??
-                                        "Unknown team"}
-                                    </span>
-                                  </Link>
-                                </td>
-                                <td className="px-4 py-4 text-center">
-                                  {standing.played}
-                                </td>
-                                <td className="px-4 py-4 text-center">
-                                  {standing.wins}
-                                </td>
-                                <td className="px-4 py-4 text-center">
-                                  {standing.draws}
-                                </td>
-                                <td className="px-4 py-4 text-center">
-                                  {standing.losses}
-                                </td>
-                                <td className="px-4 py-4 text-center">
-                                  {standing.goals_for}
-                                </td>
-                                <td className="px-4 py-4 text-center">
-                                  {standing.goals_against}
-                                </td>
-                                <td className="px-4 py-4 text-center">
-                                  {standing.goal_difference}
-                                </td>
-                                <td className="px-4 py-4 text-center font-bold">
-                                  {standing.points}
-                                </td>
-                              </tr>
-                            ),
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </section>
-              </div>
+                    gameweeks={divisionGameweeks}
+                    selectedGameweek={selectedGameweek}
+                    onGameweekChange={setSelectedGameweek}
+                    emptyMessage="No upcoming fixtures."
+                  />
+                )}
+                {tab === "results" && (
+                  <FixtureList
+                    fixtures={filteredFixtures.filter(
+                      (fixture) =>
+                        fixture.status === "completed" ||
+                        fixture.completed_at !== null ||
+                        (fixture.home_score !== null &&
+                          fixture.away_score !== null),
+                    )}
+                    gameweeks={divisionGameweeks}
+                    selectedGameweek={selectedGameweek}
+                    onGameweekChange={setSelectedGameweek}
+                    emptyMessage="No results yet."
+                  />
+                )}
+              </>
             )}
           </>
         )}
       </div>
     </main>
+  );
+}
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`whitespace-nowrap border-b-2 px-5 py-3 text-sm font-semibold transition ${
+        active
+          ? "border-foreground text-foreground"
+          : "border-transparent text-muted-foreground hover:text-foreground"
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 function StatCard({
@@ -635,95 +550,285 @@ function StatCard({
   value: string;
 }) {
   return (
-    <div className="rounded-xl border bg-card p-5">
-      <div className="flex items-center gap-3 text-muted-foreground">
+    <div className="rounded-xl border bg-card p-4">
+      <div className="flex items-center gap-2 text-muted-foreground">
         {icon}
-        <span className="text-sm">{label}</span>
+        <span className="text-xs font-semibold uppercase tracking-wide">
+          {label}
+        </span>
       </div>
-      <p className="mt-3 text-3xl font-bold">{value}</p>
+      <p className="mt-3 text-2xl font-bold">{value}</p>
     </div>
   );
 }
-function FixtureRow({ fixture }: { fixture: Fixture }) {
-  const completed =
-    fixture.status === "completed" ||
-    fixture.completed_at !== null ||
-    (fixture.home_score !== null &&
-      fixture.away_score !== null);
-  const kickoff = new Date(fixture.kickoff_at);
+function Overview({
+  upcomingFixtures,
+  completedFixtures,
+}: {
+  upcomingFixtures: Fixture[];
+  completedFixtures: Fixture[];
+}) {
   return (
-    <div className="grid gap-4 px-5 py-5 sm:grid-cols-[120px_1fr_100px] sm:items-center">
-      <div className="text-center sm:text-left">
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          {fixture.gameweek
-            ? `Gameweek ${fixture.gameweek}`
-            : "Fixture"}
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {kickoff.toLocaleDateString(undefined, {
-            day: "numeric",
-            month: "short",
-          })}
-        </p>
-      </div>
-      <div className="space-y-3">
-        <TeamLine
-          team={fixture.home_team}
-          score={fixture.home_score}
-        />
-        <TeamLine
-          team={fixture.away_team}
-          score={fixture.away_score}
-        />
-      </div>
-      <div className="text-center sm:text-right">
-        {completed ? (
-          <span className="rounded-full border px-3 py-1.5 text-xs font-semibold">
-            FT
-          </span>
+    <div className="grid gap-6 lg:grid-cols-2">
+      <section className="rounded-xl border bg-card p-5">
+        <div className="mb-5">
+          <h2 className="text-lg font-bold">Upcoming</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            The next fixtures in this division.
+          </p>
+        </div>
+        {upcomingFixtures.length === 0 ? (
+          <EmptyState text="No upcoming fixtures." />
         ) : (
-          <div>
-            <p className="text-sm font-semibold">
-              {kickoff.toLocaleTimeString(undefined, {
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Upcoming
-            </p>
+          <div className="space-y-3">
+            {upcomingFixtures.map((fixture) => (
+              <FixtureRow key={fixture.id} fixture={fixture} />
+            ))}
+          </div>
+        )}
+      </section>
+      <section className="rounded-xl border bg-card p-5">
+        <div className="mb-5">
+          <h2 className="text-lg font-bold">Latest results</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            The most recently completed matches.
+          </p>
+        </div>
+        {completedFixtures.length === 0 ? (
+          <EmptyState text="No results yet." />
+        ) : (
+          <div className="space-y-3">
+            {completedFixtures.map((fixture) => (
+              <FixtureRow key={fixture.id} fixture={fixture} />
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+function StandingsTable({
+  standings,
+}: {
+  standings: Standing[];
+}) {
+  return (
+    <section className="overflow-hidden rounded-xl border bg-card">
+      <div className="border-b px-5 py-4">
+        <h2 className="text-lg font-bold">League Table</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Live standings from NOVA.
+        </p>
+      </div>
+      {standings.length === 0 ? (
+        <EmptyState text="No standings available yet." />
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[680px] text-sm">
+            <thead>
+              <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
+                <th className="px-5 py-3 font-semibold">#</th>
+                <th className="px-3 py-3 font-semibold">Team</th>
+                <th className="px-3 py-3 text-center font-semibold">P</th>
+                <th className="px-3 py-3 text-center font-semibold">W</th>
+                <th className="px-3 py-3 text-center font-semibold">D</th>
+                <th className="px-3 py-3 text-center font-semibold">L</th>
+                <th className="px-3 py-3 text-center font-semibold">GD</th>
+                <th className="px-5 py-3 text-center font-semibold">PTS</th>
+              </tr>
+            </thead>
+            <tbody>
+              {standings.map((standing, index) => (
+                <tr
+                  key={standing.id}
+                  className="border-b last:border-b-0"
+                >
+                  <td className="px-5 py-4 font-semibold text-muted-foreground">
+                    {index + 1}
+                  </td>
+                  <td className="px-3 py-4">
+                    <div className="flex items-center gap-3">
+                      {standing.team?.logo_url ? (
+                        <img
+                          src={standing.team.logo_url}
+                          alt=""
+                          className="size-7 rounded-full object-contain"
+                        />
+                      ) : (
+                        <div className="flex size-7 items-center justify-center rounded-full border text-[10px] font-bold">
+                          {standing.team?.name?.slice(0, 1) ?? "?"}
+                        </div>
+                      )}
+                      <span className="font-semibold">
+                        {standing.team?.name ?? "Unknown team"}
+                      </span>
+                    </div>
+                  </td>
+                  <td className="px-3 py-4 text-center">
+                    {standing.played}
+                  </td>
+                  <td className="px-3 py-4 text-center">
+                    {standing.wins}
+                  </td>
+                  <td className="px-3 py-4 text-center">
+                    {standing.draws}
+                  </td>
+                  <td className="px-3 py-4 text-center">
+                    {standing.losses}
+                  </td>
+                  <td className="px-3 py-4 text-center">
+                    {standing.goal_difference > 0
+                      ? `+${standing.goal_difference}`
+                      : standing.goal_difference}
+                  </td>
+                  <td className="px-5 py-4 text-center font-bold">
+                    {standing.points}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+function FixtureList({
+  fixtures,
+  gameweeks,
+  selectedGameweek,
+  onGameweekChange,
+  emptyMessage,
+}: {
+  fixtures: Fixture[];
+  gameweeks: Gameweek[];
+  selectedGameweek: number | null;
+  onGameweekChange: (value: number | null) => void;
+  emptyMessage: string;
+}) {
+  return (
+    <section className="rounded-xl border bg-card">
+      <div className="flex flex-col gap-4 border-b p-5 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-lg font-bold">Matches</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            All matches generated for this division.
+          </p>
+        </div>
+        {gameweeks.length > 0 && (
+          <div className="relative">
+            <select
+              value={
+                selectedGameweek === null
+                  ? "all"
+                  : String(selectedGameweek)
+              }
+              onChange={(event) => {
+                const value = event.target.value;
+                onGameweekChange(
+                  value === "all" ? null : Number(value),
+                );
+              }}
+              className="appearance-none rounded-lg border bg-background py-2 pl-3 pr-9 text-sm font-semibold outline-none"
+            >
+              <option value="all">All Gameweeks</option>
+              {gameweeks.map((gameweek) => (
+                <option
+                  key={gameweek.id}
+                  value={gameweek.number}
+                >
+                  Gameweek {gameweek.number}
+                </option>
+              ))}
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2" />
           </div>
         )}
       </div>
+      {fixtures.length === 0 ? (
+        <EmptyState text={emptyMessage} />
+      ) : (
+        <div className="divide-y">
+          {fixtures.map((fixture) => (
+            <FixtureRow
+              key={fixture.id}
+              fixture={fixture}
+              detailed
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+function FixtureRow({
+  fixture,
+  detailed = false,
+}: {
+  fixture: Fixture;
+  detailed?: boolean;
+}) {
+  const completed =
+    fixture.status === "completed" ||
+    fixture.completed_at !== null ||
+    (fixture.home_score !== null && fixture.away_score !== null);
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-lg border bg-background p-4">
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          {fixture.gameweek !== null && (
+            <span>GW {fixture.gameweek}</span>
+          )}
+          <span>•</span>
+          <span>
+            {new Date(fixture.kickoff_at).toLocaleDateString()}
+          </span>
+          {detailed && fixture.competition && (
+            <>
+              <span>•</span>
+              <span>{fixture.competition}</span>
+            </>
+          )}
+        </div>
+        <div className="mt-3 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+          <div className="flex min-w-0 items-center gap-2">
+            {fixture.home_team?.logo_url && (
+              <img
+                src={fixture.home_team.logo_url}
+                alt=""
+                className="size-6 rounded-full object-contain"
+              />
+            )}
+            <span className="truncate text-sm font-semibold">
+              {fixture.home_team?.name ?? "TBD"}
+            </span>
+          </div>
+          <div className="text-center text-sm font-bold">
+            {completed
+              ? `${fixture.home_score ?? 0} - ${fixture.away_score ?? 0}`
+              : "vs"}
+          </div>
+          <div className="flex min-w-0 items-center justify-end gap-2">
+            <span className="truncate text-right text-sm font-semibold">
+              {fixture.away_team?.name ?? "TBD"}
+            </span>
+            {fixture.away_team?.logo_url && (
+              <img
+                src={fixture.away_team.logo_url}
+                alt=""
+                className="size-6 rounded-full object-contain"
+              />
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
-function TeamLine({
-  team,
-  score,
-}: {
-  team?: Team | null;
-  score: number | null;
-}) {
+function EmptyState({ text }: { text: string }) {
   return (
-    <div className="flex items-center justify-between gap-4">
-      <div className="flex min-w-0 items-center gap-3">
-        {team?.logo_url ? (
-          <img
-            src={team.logo_url}
-            alt=""
-            className="size-8 shrink-0 object-contain"
-          />
-        ) : (
-          <div className="size-8 shrink-0 rounded-full border" />
-        )}
-        <span className="truncate text-sm font-medium">
-          {team?.name ?? "Unknown team"}
-        </span>
-      </div>
-      <span className="min-w-5 text-right text-sm font-bold">
-        {score !== null ? score : ""}
-      </span>
+    <div className="px-5 py-12 text-center">
+      <p className="text-sm text-muted-foreground">{text}</p>
     </div>
   );
 }
