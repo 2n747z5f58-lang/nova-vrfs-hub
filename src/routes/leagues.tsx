@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -56,10 +56,7 @@ function Leagues() {
     }
 
     if (divisionResponse.error) {
-      console.error(
-        "Failed to load divisions:",
-        divisionResponse.error,
-      );
+      console.error("Failed to load divisions:", divisionResponse.error);
       setError("Couldn't load league tiers.");
       setLoading(false);
       return;
@@ -113,10 +110,6 @@ function Leagues() {
     }
 
     return `Tiers ${Math.min(...uniqueTiers)}-${Math.max(...uniqueTiers)}`;
-  }
-
-  function openLeague(leagueId: string) {
-    window.location.assign(`/leagues/${leagueId}`);
   }
 
   if (loading) {
@@ -215,13 +208,13 @@ function Leagues() {
                           }`}
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => openLeague(league.id)}
+                    <Link
+                      to="/leagues/$leagueId"
+                      params={{ leagueId: league.id }}
                       className="rounded-lg bg-foreground px-4 py-2 text-sm font-semibold text-background transition hover:opacity-85"
                     >
                       View League
-                    </button>
+                    </Link>
                   </div>
                 </div>
               );
