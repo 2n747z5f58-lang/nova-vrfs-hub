@@ -892,7 +892,6 @@ function FixtureList({
     </section>
   );
 }
-
 function FixtureRow({
   fixture,
   detailed = false,
@@ -910,4 +909,68 @@ function FixtureRow({
     <div className="flex items-center justify-between gap-4 rounded-lg border bg-background p-4">
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          {fixture.gameweek !== null
+          {fixture.gameweek !== null && (
+            <span>GW {fixture.gameweek}</span>
+          )}
+
+          <span>•</span>
+
+          <span>
+            {new Date(fixture.kickoff_at).toLocaleDateString()}
+          </span>
+
+          {detailed && fixture.competition && (
+            <>
+              <span>•</span>
+              <span>{fixture.competition}</span>
+            </>
+          )}
+        </div>
+
+        <div className="mt-3 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+          <div className="flex min-w-0 items-center gap-2">
+            {fixture.home_team?.logo_url && (
+              <img
+                src={fixture.home_team.logo_url}
+                alt=""
+                className="size-6 rounded-full object-contain"
+              />
+            )}
+
+            <span className="truncate text-sm font-semibold">
+              {fixture.home_team?.name ?? "TBD"}
+            </span>
+          </div>
+
+          <div className="text-center text-sm font-bold">
+            {completed
+              ? `${fixture.home_score ?? 0} - ${fixture.away_score ?? 0}`
+              : "vs"}
+          </div>
+
+          <div className="flex min-w-0 items-center justify-end gap-2">
+            <span className="truncate text-right text-sm font-semibold">
+              {fixture.away_team?.name ?? "TBD"}
+            </span>
+
+            {fixture.away_team?.logo_url && (
+              <img
+                src={fixture.away_team.logo_url}
+                alt=""
+                className="size-6 rounded-full object-contain"
+              />
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EmptyState({ text }: { text: string }) {
+  return (
+    <div className="px-5 py-12 text-center">
+      <p className="text-sm text-muted-foreground">{text}</p>
+    </div>
+  );
+}
