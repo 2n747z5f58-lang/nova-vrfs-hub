@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -83,13 +83,12 @@ function Leagues() {
                   )}
                 </div>
 
-                <Link
-                  to="/leagues/$leagueId"
-                  params={{ leagueId: league.id }}
+                <a
+                  href={`/leagues/${league.id}`}
                   className="inline-flex rounded-lg bg-foreground px-4 py-2 text-sm font-semibold text-background transition-opacity hover:opacity-85"
                 >
                   View League
-                </Link>
+                </a>
               </div>
             ))}
           </div>
